@@ -69,6 +69,10 @@ export function TasksPage() {
         .filter(Boolean)
         .join(" ")}
       onClick={() => selectTask(task.id)}
+      /* Selecting with the mouse must not park DOM focus on the row: the next
+         keybind would paint a :focus-visible ring an instant before the page
+         unmounts it. Keyboard focus (Tab) still works and still rings. */
+      onMouseDown={(event) => event.preventDefault()}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {

@@ -36,6 +36,9 @@ function Shell() {
       const nav = NAV_ITEMS.find((item) => item.key === event.key);
       if (nav) {
         event.preventDefault();
+        // Never unmount a page while something inside it holds focus — the
+        // :focus-visible ring outlives the node it was painted around.
+        if (el && el !== document.body) el.blur();
         setPage(nav.id);
       }
     };

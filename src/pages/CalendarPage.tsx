@@ -2,6 +2,7 @@
  *  Drag-and-drop is stubbed: the tray items are draggable and the grid accepts a
  *  drop, but nothing is persisted yet. */
 
+import type { DragEvent } from "react";
 import { useState } from "react";
 import { useApp } from "../data/store";
 import { events, todayColumn, unscheduledTaskIds } from "../data/mock";
@@ -21,6 +22,24 @@ const HOUR_PX = 88;
 const NOW_MINUTES = 12 * 60 + 55;
 
 const yFor = (minutes: number) => ((minutes - START_HOUR * 60) / 60) * HOUR_PX;
+
+/** Ghost blocks are as tall as the estimate, floored so short tasks stay legible. */
+const heightFor = (minutes: number | undefined) =>
+  Math.max(24, ((minutes ?? 30) / 60) * HOUR_PX);
+
+/** The tray chip is 236px wide — the width of the sidebar — so the browser's default
+ *  drag image dwarfs the day column it is dropped into. Render a column-sized proxy
+ *  instead and hand that to setDragImage. */
+function setChipDragImage(event: DragEvent, title: string, estimate?: number) {
+  const proxy = document.createElement("div");
+  proxy.className = "cal-event cal-event-ghost cal-drag-proxy";
+  proxy.style.height = `${heightFor(estimate)}px`;
+  proxy.textContent = title;
+  document.body.appendChild(proxy);
+  event.dataTransfer.setDragImage(proxy, 8, 8);
+  // the proxy only needs to survive the snapshot the browser takes this frame
+  window.setTimeout(() => proxy.remove(), 0);
+}
 
 export function CalendarPage() {
   const { tasks, selectTask } = useApp();
@@ -73,7 +92,10 @@ export function CalendarPage() {
               key={task.id}
               className={`chip${dragging === task.id ? " chip-dragging" : ""}`}
               draggable
-              onDragStart={() => setDragging(task.id)}
+              onDragStart={(event) => {
+                setChipDragImage(event, task.title, task.estimateMinutes);
+                setDragging(task.id);
+              }}
               onDragEnd={() => {
                 setDragging(null);
                 setDropHint(null);
@@ -117,6 +139,11 @@ export function CalendarPage() {
             draggingTitle={
               dragging ? (tasks.find((t) => t.id === dragging)?.title ?? null) : null
             }
+            draggingEstimate={
+              dragging
+                ? (tasks.find((t) => t.id === dragging)?.estimateMinutes ?? null)
+                : null
+            }
           />
         )}
       </div>
@@ -129,11 +156,13 @@ function WeekGrid({
   onHover,
   onDrop,
   draggingTitle,
+  draggingEstimate,
 }: {
   dropHint: { day: number; minutes: number } | null;
   onHover: (hint: { day: number; minutes: number } | null) => void;
   onDrop: () => void;
   draggingTitle: string | null;
+  draggingEstimate: number | null;
 }) {
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i);
 
@@ -199,7 +228,10 @@ function WeekGrid({
             {draggingTitle && dropHint?.day === dayIndex && (
               <div
                 className="cal-event cal-event-ghost"
-                style={{ top: yFor(dropHint.minutes), height: 60 }}
+                style={{
+                  top: yFor(dropHint.minutes),
+                  height: heightFor(draggingEstimate ?? undefined),
+                }}
               >
                 {draggingTitle}
                 <div className="cal-event-sub">{formatClock(dropHint.minutes)}</div>

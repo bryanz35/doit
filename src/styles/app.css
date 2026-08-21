@@ -342,3 +342,9 @@ body { overflow: hidden; }
   display: grid; grid-template-columns: auto 1fr;
   gap: 10px 14px; align-items: center; font-size: 13px;
 }
+
+/* drag proxy — a detached, column-sized stand-in for the browser's drag image */
+.cal-drag-proxy {
+  position: fixed; top: -1000px; left: -1000px;
+  width: 132px; box-sizing: border-box;
+}
