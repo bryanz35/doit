@@ -21,3 +21,25 @@ pub fn run(conn: &Connection) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        run(&conn).unwrap();
+        conn
+    }
+    // checks if migrations are the same after applying twice
+    #[test]
+    fn migrations_are_idempotent() {
+        let conn = fresh();
+        run(&conn).unwrap(); // what does this do?
+        let v: u32 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .unwrap();
+        assert_eq!(v, MIGRATIONS.len() as u32);
+    }
+}
