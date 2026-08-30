@@ -1,4 +1,6 @@
 // Data types go here; will mirror src/types.ts
+use crate::AppError;
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -9,6 +11,41 @@ pub enum TaskStatus {
     Done,
     Idea,
     Blocked,
+}
+
+impl TaskStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskStatus::Todo => "todo",
+            TaskStatus::InProgress => "in-progress",
+            TaskStatus::Done => "done",
+            TaskStatus::Idea => "idea",
+            TaskStatus::Blocked => "blocked",
+        }
+    }
+    pub fn parse(s: &str) -> crate::error::Result<Self> {
+        Ok(match s {
+            "todo" => TaskStatus::Todo,
+            "in-progress" => TaskStatus::InProgress,
+            "done" => TaskStatus::Done,
+            "idea" => TaskStatus::Idea,
+            "blocked" => TaskStatus::Blocked,
+            other => return Err(AppError::Invalid(format!("unknown status {other:?}"))),
+        })
+    }
+}
+
+impl ToSql for TaskStatus {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl FromSql for TaskStatus {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let s = value.as_str()?;
+        TaskStatus::parse(s).map_err(|e| FromSqlError::Other(Box::new(e)))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
