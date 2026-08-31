@@ -1,6 +1,7 @@
 mod db;
 mod error;
 mod model;
+mod tasks;
 
 pub use error::{AppError, Result};
 

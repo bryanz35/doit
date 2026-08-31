@@ -60,8 +60,15 @@ pub struct Task {
     pub due: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimate_minutes: Option<i64>, //estimateMinutes in ts
-
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pomodoros: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list: Option<String>,
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
     pub depends_on: Vec<String>,
 }
 
