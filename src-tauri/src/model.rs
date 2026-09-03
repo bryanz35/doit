@@ -72,10 +72,21 @@ pub struct Task {
     pub depends_on: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// Partial update for a task: every field is `None` for "leave this column
+/// alone". Deserialized straight from the frontend's patch object, so the
+/// camelCase rename has to match `TaskPatch` in src/types.ts.
+///
+/// Note the consequence of the COALESCE-based UPDATE in `tasks::update_task`:
+/// a `None` means "unchanged", so this cannot express "clear this column back
+/// to NULL". If clearing is ever needed, the field has to become
+/// `Option<Option<T>>` with `#[serde(default, deserialize_with = ...)]` to tell
+/// an absent key apart from an explicit `null`.
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPatch {
     pub title: Option<String>,
     pub notes: Option<String>,
     pub status: Option<TaskStatus>,
+    pub due: Option<String>,
+    pub estimate_minutes: Option<i64>,
 }

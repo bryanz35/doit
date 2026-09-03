@@ -10,7 +10,7 @@ pub fn run(conn: &Connection) -> Result<()> {
         conn.execute_batch("BEGIN")?;
         match conn.execute_batch(sql) {
             Ok(()) => {
-                conn.pragma_update(None, "User_version", i as u32 + 1)?;
+                conn.pragma_update(None, "user_version", i as u32 + 1)?;
                 conn.execute_batch("COMMIT")?;
             }
             Err(e) => {
