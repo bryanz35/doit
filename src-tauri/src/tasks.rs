@@ -1,7 +1,7 @@
 use crate::error::{AppError, Result};
 use crate::model::{Task, TaskPatch};
 use rusqlite::{params, Connection, OptionalExtension, Row};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Every column `row_to_task` reads, in one place. `row_to_task` looks columns
 /// up by name, so any SELECT feeding it must list all of these.
@@ -122,6 +122,7 @@ fn collect_pairs(conn: &Connection, sql: &str) -> Result<HashMap<String, Vec<Str
     Ok(map)
 }
 
+// constructs a task object with data from sql table, tags and dependencies filled in later
 fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
     Ok(Task {
         id: row.get("id")?,
@@ -165,6 +166,98 @@ fn deps_for(conn: &Connection, id: &str) -> Result<Vec<String>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+pub fn toggle_task(conn: &Connection, id: &str) -> Result<Task> {
+    // the status in second CASE is still the original value (not a bug)
+    let n = conn.execute(
+        "UPDATE tasks SET status = CASE WHEN status = 'done' then 'todo' ELSE 'done' END,
+        completed_at = CASE when status = 'done' THEN NULL
+        ELSE strftime('%Y-%m-%dT%H:%M:%SZ', 'now') END
+        WHERE id = ?1",
+        params![id],
+    )?;
+    if n == 0 {
+        return Err(AppError::NotFound(id.to_string()));
+    }
+    get_task(conn, id)
+}
+// transaction is exclusive so &mut Connection (exclusive borrow)
+pub fn set_task_tags(conn: &mut Connection, id: &str, tags: &[String]) -> Result<Task> {
+    // sort -> dedup clears repeated elements (note: read github later its super cool)
+    let mut cleaned: Vec<&str> = tags
+        .iter()
+        .map(|t| t.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+    cleaned.sort_unstable();
+    cleaned.dedup();
+    let tx = conn.transaction()?;
+
+    tx.query_row("Select 1 FROM tasks Where id = ?1", params![id], |_| Ok(()))
+        .optional()?
+        .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+    tx.execute("DELETE FROM task_tags WHERE task_id = ?1", params![id])?;
+    {
+        let mut tmp = tx.prepare("INSERT INTO task_tags (task_id, tag) VALUES (?1, ?2)")?;
+        for tag in &cleaned {
+            tmp.execute(params![id, tag])?;
+        }
+    }
+    tx.commit()?;
+    get_task(conn, id)
+}
+
+pub fn set_task_deps(conn: &mut Connection, id: &str, depends_on: &[String]) -> Result<Task> {
+    let mut cleaned: Vec<&str> = depends_on
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    cleaned.sort_unstable();
+    cleaned.dedup();
+    if cleaned.iter().any(|d| *d == id) {
+        return Err(AppError::Invalid("A task cannot depend on itself".into()));
+    }
+    let tx = conn.transaction()?;
+    tx.query_row("SELECT 1 FROM tasks WHERE id = ?1", params![id], |_| Ok(()))
+        .optional()?
+        .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+    tx.execute("DELETE FROM task_deps WHERE task_id = ?1", params![id])?;
+    {
+        let mut tmp =
+            tx.prepare("INSERT INTO task_deps (task_id, depends_on_id) VALUES (?1, ?2)")?;
+        for dep in &cleaned {
+            tmp.execute(params![id, dep])?;
+        }
+    }
+    let edges = collect_pairs(&tx, "SELECT task_id, depends_on_id FROM task-deps")?;
+    if reaches(&edges, id, id) {
+        return Err(AppError::Invalid(format!(
+            "Cycle in dependencies: {id} depends on itself"
+        )));
+    }
+    tx.commit()?;
+    get_task(conn, id)
+}
+fn reaches(edges: &HashMap<String, Vec<String>>, from: &str, to: &str) -> bool {
+    let mut stack: Vec<&str> = edges
+        .get(from)
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    let mut seen: HashSet<&str> = HashSet::new();
+    while let Some(node) = stack.pop() {
+        if node == to {
+            return true;
+        }
+        if !seen.insert(node) {
+            continue;
+        }
+        stack.extend(edges.get(node).into_iter().flatten().map(String::as_str));
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,7 +274,13 @@ mod tests {
     #[test]
     fn create_reads_back() {
         let mut conn = fresh();
-        let t = create_task(&mut conn, "  write tests  ", Some("2026-09-10"), Some("work")).unwrap();
+        let t = create_task(
+            &mut conn,
+            "  write tests  ",
+            Some("2026-09-10"),
+            Some("work"),
+        )
+        .unwrap();
         assert_eq!(t.title, "write tests");
         assert_eq!(t.status, TaskStatus::Todo);
         assert_eq!(t.due.as_deref(), Some("2026-09-10"));
