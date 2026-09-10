@@ -14,6 +14,9 @@ pub enum AppError {
 
     #[error("{0}")]
     Invalid(String),
+
+    #[error("database lock panic")]
+    Lock,
 }
 
 impl serde::Serialize for AppError {

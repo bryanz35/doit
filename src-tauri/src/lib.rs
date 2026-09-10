@@ -1,3 +1,4 @@
+mod command;
 mod db;
 mod error;
 mod model;
@@ -17,7 +18,7 @@ pub fn run() {
             app.manage(db::Db(std::sync::Mutex::new(conn)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![])
+        .invoke_handler(tauri::generate_handler![commands::list_tasks])
         .run(tauri::generate_context!())
         .expect("Error while running tauri application")
 }

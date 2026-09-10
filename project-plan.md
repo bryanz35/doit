@@ -24,12 +24,16 @@ future:
 
 # Implementation plan
 
-Current state (2026-08-29): the storage layer exists and runs; `cargo test`
-passes and the app creates `~/.local/share/com.bryan.doit/doit.sqlite3` on first
-launch. `model.rs` holds `TaskStatus`, `Task`, `TaskPatch`. No commands are
-registered yet — `generate_handler![]` is empty and the template's `greet` is
-gone. The frontend is untouched: ~2k lines of UI still
-reading `src/data/mock.ts`, and nothing calls `invoke`.
+Current state (2026-09-06): the storage layer and the task logic both exist and
+run; `cargo test` is 23 green and the app creates
+`~/.local/share/com.bryan.doit/doit.sqlite3` on first launch. `model.rs` holds
+`TaskStatus`, `Task`, `TaskPatch`; `tasks.rs` holds all six task functions as
+plain fns over `&Connection`, with tests. Nothing is reachable from the app yet
+— `commands.rs` does not exist and `generate_handler![]` is still empty (the
+template's `greet` is gone). Every fn in `tasks.rs` is therefore dead code, and
+`cargo build` says so: ~20 dead-code warnings, all expected until the wrappers
+land. The frontend is untouched: ~2k lines of UI still reading
+`src/data/mock.ts`, and nothing calls `invoke`.
 
 "Working" for the first milestone means: tasks survive a restart, the timer is
 real, the calendar exports. Everything past that is the scope above.
@@ -65,18 +69,26 @@ real, the calendar exports. Everything past that is the scope above.
 
 **Known gaps in the storage layer**
 
-- Only one test (`migrations_are_idempotent`). Worth having, all cheap against
-  `Connection::open_in_memory()`: deleting a task cascades to `task_tags` (the
-  only thing that catches a missing `foreign_keys` pragma); a bad status value is
-  rejected; serde and `as_str` agree on every variant; create/list round-trips;
-  toggle sets then clears `completed_at`.
+- Tests are at 23, all against `Connection::open_in_memory()` via the `fresh()`
+  helper in `tasks.rs`. Covered: create/list round-trip and `sort_order`
+  ordering, due validation, patch-only-named-fields, the `completed_at`
+  transition, toggle in all three directions, tags and deps trim/dedup/replace,
+  the cycle rejection and its rollback, a diamond that must *not* be rejected,
+  `NotFound` on every write path, and cascade on delete from both ends of an
+  edge. Still missing, both cheap: a bad status value is rejected by the CHECK
+  constraint, and serde agrees with `as_str` on every variant (see the model
+  section).
 - `db::open` takes a directory and creates a real file, so tests can't exercise
   it — they re-set the pragmas by hand and can drift from production. Split into
   `open(dir)` + `configure(&conn)` once there are more pragmas to get wrong.
 - `list` is a column on `tasks`, not a table, so a list can't be renamed or
   exist while empty. Promote it in `002_lists.sql` when lists CRUD lands.
-- Cycle detection for `task_deps` has no home yet. The schema's CHECK blocks
-  only self-edges; A→B→C→A has to be rejected in Rust, inside `set_task_deps`.
+- Cycle detection lives in `tasks::reaches`, called from `set_task_deps` after
+  the inserts but before `tx.commit()`, so a rejected write rolls back when the
+  `Err` drops the transaction. The schema's CHECK still handles self-edges.
+  Two rough edges left: the error text says "{id} depends on itself" for a cycle
+  of any length, and the whole `task_deps` table is read on every write — fine
+  at this size, worth a bounded walk if it ever isn't.
 - `completed_at` is stored as RFC3339, but `types.ts` still documents a display
   string (`"14:32"` from `toLocaleTimeString`) that loses the date, so completed
   tasks can't be bucketed across a day boundary. Decided: RFC3339 all the way to
@@ -96,17 +108,19 @@ is visible in a diff.
 - [x] `impl ToSql`/`FromSql for TaskStatus`, so `params![status]` and
       `row.get("status")` work directly and `Option<TaskStatus>` comes free.
       Legal under the orphan rule because the type is local.
-- [ ] `Task` — missing `pomodoros`, `list`, `repo`, `completed_at`, all present
-      in both `types.ts` and the `tasks` table. Serde omits an absent field
-      silently, so the UI reads `undefined` with no error anywhere. Add before
-      writing `tasks.rs`.
+- [x] `Task` — `pomodoros`, `list`, `repo` and `completed_at` are on the struct
+      and in `TASK_COLUMNS`, so `row_to_task` reads every column `types.ts`
+      expects. Serde omits an absent field silently, so a missing one would have
+      been `undefined` in the UI with no error anywhere.
 - [x] `Task` field convention — every optional field is `Option<T>` plus
       `#[serde(skip_serializing_if = "Option::is_none")]`, so a NULL column
       arrives as `undefined`, not `null`. `types.ts` is `strict`, and `null` is
       not assignable to `string | undefined`. `created_at`/`sort_order` are
       columns but deliberately not on the struct — ordering is server-side.
-- [ ] `TaskPatch` is a stub (title/notes/status). The detail pane in §3 also
-      needs `due`, `estimate_minutes`, `pomodoros`, `list`, `tags`. `None` means
+- [ ] `TaskPatch` covers title/notes/status/due/estimate_minutes. The detail
+      pane in §3 also needs `pomodoros` and `list` — both are columns
+      `update_task` currently cannot touch. (`tags` has its own fn,
+      `set_task_tags`, so it does not belong on the patch.) `None` still means
       "not sent", so there is no way to *clear* a field; the fix is
       `Option<Option<T>>` with a custom `deserialize_with`, deferred.
 - [ ] The kebab-case strings exist twice — serde's `rename_all` and `as_str` —
@@ -115,20 +129,60 @@ is visible in a diff.
       diverges with no compile error. Guard with a test asserting
       `serde_json::to_string(&s)` matches `as_str()` for every variant.
 
-**Next: task commands.** `tasks.rs` (plain fns over `&Connection`) then
-`commands.rs` (thin `#[tauri::command]` wrappers).
+**Task logic** — `src-tauri/src/tasks.rs`, done. Plain fns over `&Connection`
+(`&mut` where a transaction is needed), no Tauri types, so every one is testable
+against `Connection::open_in_memory()`.
 
-**Command surface** — none implemented. Names match the seam comments already in
-the code.
+- [x] `create_task`, `update_task`, `delete_task`, `list_tasks`, `toggle_task`,
+      `set_task_deps` — the six from the table below — plus `set_task_tags`,
+      which §3's tag editing needs and the table did not name.
+- [x] `TASK_COLUMNS` is the single column list feeding `row_to_task`, shared by
+      `get_task` and `list_tasks`, since `row_to_task` looks columns up by name
+      and a SELECT that omits one panics at runtime, not compile time.
+- [x] `list_tasks` is three queries, not N+1: `collect_pairs` folds `task_tags`
+      and `task_deps` into `HashMap<String, Vec<String>>` and they are drained
+      onto the tasks while iterating.
+- [x] `update_task` is one `UPDATE` of `COALESCE(?n, column)`s, so a `None`
+      leaves a column alone. `completed_at` is derived from the status
+      transition in a `CASE`, not sent by the caller.
+- [x] `toggle_task` reads the pre-update `status` in both `CASE`s — SQLite
+      evaluates every SET expression against the original row, so the second
+      `CASE` sees the old value on purpose.
+- [x] `check_due` parses with chrono *and* re-formats to compare, because
+      `%Y-%m-%d` accepts `2026-9-10` and `26-09-10`. `due` is stored as a string
+      and the UI compares it as one, so only the zero-padded form is legal.
+- [x] Rows-affected is the 404 on every write path; `get_task` translates
+      `query_row`'s no-rows into `AppError::NotFound`.
+
+**Known gaps in `tasks.rs`**
+
+- An unknown id in `depends_on` hits the foreign key and surfaces as
+  `AppError::Db("FOREIGN KEY constraint failed")`, not `NotFound` — an opaque
+  string for the UI. Same for `set_task_tags`. Translate it when the wrappers
+  land, since that is where the error surface becomes user-visible.
+- `set_task_deps` validates the *owning* task exists but not the targets; the FK
+  above is the only thing catching them.
+- No ordering command. `sort_order` is written once at create
+  (`COALESCE(MAX(sort_order), 0) + 1`) and never changed, so the list cannot be
+  reordered by hand. It is a REAL column specifically so a reorder can insert
+  between two rows without rewriting the table — that fn is unwritten.
+
+**Next: `commands.rs`.** Thin `#[tauri::command]` wrappers — lock the
+`Db(Mutex<Connection>)`, delegate to the `tasks.rs` fn, return. Register each in
+`generate_handler![...]` as it lands. That clears the dead-code warnings and is
+the last thing between the storage layer and the frontend rewire in §2.
+
+**Command surface** — the six task commands exist as plain fns; none are
+registered as commands yet. Names match the seam comments already in the code.
 
 | Command | Returns | Called from | Done |
 | --- | --- | --- | --- |
-| `list_tasks` | `Vec<Task>` | store init | |
-| `create_task { title, due?, list? }` | `Task` | `store.tsx:78` | |
-| `update_task { id, patch }` | `Task` | detail pane (new UI) | |
-| `toggle_task { id }` | `Task` | `store.tsx:56` | |
-| `delete_task { id }` | `()` | missing UI | |
-| `set_task_deps { id, depends_on }` | `Task` | `GraphPage` | |
+| `list_tasks` | `Vec<Task>` | store init | fn |
+| `create_task { title, due?, list? }` | `Task` | `store.tsx:78` | fn |
+| `update_task { id, patch }` | `Task` | detail pane (new UI) | fn |
+| `toggle_task { id }` | `Task` | `store.tsx:56` | fn |
+| `delete_task { id }` | `()` | missing UI | fn |
+| `set_task_deps { id, depends_on }` | `Task` | `GraphPage` | fn |
 | `list_events { week_start }` | `Vec<CalendarEvent>` | `CalendarPage` | |
 | `schedule_task { id, day, start_minutes, duration }` | `CalendarEvent` | `CalendarPage.tsx:113` | |
 | `unschedule_event { id }` | `()` | `CalendarPage` | |
@@ -136,6 +190,10 @@ the code.
 | `start_focus` / `pause_focus` / `complete_pomodoro` / `log_interruption` | `FocusSession` | `FocusPage` | |
 | `get_settings` / `set_setting` | kv | `SettingsPage` | |
 | `export_ics { scope }` | path or string | `SettingsPage` | |
+
+"fn" = the logic exists in `tasks.rs` and is tested; the `#[tauri::command]`
+wrapper and the `generate_handler!` entry are still missing. `set_task_tags`
+also exists as a fn and needs the same wrapper.
 
 - Serde: `#[serde(rename_all = "camelCase")]` on every struct. `src/types.ts` is
   already camelCase (`estimateMinutes`, `dependsOn`, `startMinutes`); a mismatch
@@ -248,10 +306,11 @@ the code.
 ## Phases
 
 **P1 — persistence (unblocks everything).** *In progress.* SQLite, pragmas,
-migration runner, `AppError`, the tasks schema, and the `model.rs` structs are
-done. Left: task CRUD commands, rewiring `store.tsx` to async, deleting
-`mock.ts`, real `TODAY`, and the edit/delete UI. The app is genuinely usable at
-the end of this phase.
+migration runner, `AppError`, the tasks schema, the `model.rs` structs, and all
+of `tasks.rs` are done. Left: the `commands.rs` wrappers plus
+`generate_handler!`, then rewiring `store.tsx` to async, deleting `mock.ts`,
+real `TODAY`, and the edit/delete UI. The app is genuinely usable at the end of
+this phase.
 
 **P2 — calendar.** `events` table, schedule/unschedule persisted, real
 unscheduled tray, Day view, ICS file export.

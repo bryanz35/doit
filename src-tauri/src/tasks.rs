@@ -12,8 +12,13 @@ const TASK_COLUMNS: &str =
 /// string and nothing enforces it, so check it on the way in.
 fn check_due(due: Option<&str>) -> Result<()> {
     if let Some(d) = due {
-        chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-            .map_err(|_| AppError::Invalid(format!("due must be YYYY-MM-DD, got {d:?}")))?;
+        let parsed = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .map_err(|_| AppError::Invalid(format!("due must be YYYY-MM-DD, received {d:?}")))?;
+        if parsed.format("%Y-%m-%d").to_string() != d {
+            return Err(AppError::Invalid(format!(
+                "due must be zero-padded YYYY-MM-DD, received {d:?}"
+            )));
+        }
     }
     Ok(())
 }
@@ -229,7 +234,7 @@ pub fn set_task_deps(conn: &mut Connection, id: &str, depends_on: &[String]) -> 
             tmp.execute(params![id, dep])?;
         }
     }
-    let edges = collect_pairs(&tx, "SELECT task_id, depends_on_id FROM task-deps")?;
+    let edges = collect_pairs(&tx, "SELECT task_id, depends_on_id FROM task_deps")?;
     if reaches(&edges, id, id) {
         return Err(AppError::Invalid(format!(
             "Cycle in dependencies: {id} depends on itself"
@@ -417,5 +422,255 @@ mod tests {
             update_task(&conn, "nope", &TaskPatch::default()),
             Err(AppError::NotFound(_))
         ));
+    }
+
+    // ---- toggle_task ----
+
+    #[test]
+    fn toggle_flips_status_and_stamps_completed_at() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "ship", None, None).unwrap();
+
+        let done = toggle_task(&conn, &t.id).unwrap();
+        assert_eq!(done.status, TaskStatus::Done);
+        let stamp = done
+            .completed_at
+            .clone()
+            .expect("stamped on the way to done");
+
+        let reopened = toggle_task(&conn, &t.id).unwrap();
+        assert_eq!(reopened.status, TaskStatus::Todo);
+        assert!(reopened.completed_at.is_none(), "stamp cleared on reopen");
+
+        // A third toggle re-stamps rather than reusing the old value.
+        let done_again = toggle_task(&conn, &t.id).unwrap();
+        assert!(done_again.completed_at.is_some());
+        let _ = stamp;
+    }
+
+    /// Anything that is not 'done' toggles *to* done — the CASE has no third arm.
+    #[test]
+    fn toggle_completes_a_task_that_was_in_progress() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "wip", None, None).unwrap();
+        update_task(
+            &conn,
+            &t.id,
+            &TaskPatch {
+                status: Some(TaskStatus::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let done = toggle_task(&conn, &t.id).unwrap();
+        assert_eq!(done.status, TaskStatus::Done);
+        assert!(done.completed_at.is_some());
+    }
+
+    #[test]
+    fn toggle_reports_missing() {
+        let conn = fresh();
+        assert!(matches!(
+            toggle_task(&conn, "nope"),
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    // ---- set_task_tags ----
+
+    #[test]
+    fn set_tags_trims_dedups_and_sorts() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "a", None, None).unwrap();
+
+        let got = set_task_tags(
+            &mut conn,
+            &t.id,
+            &[
+                "  rust  ".into(),
+                "rust".into(),
+                "db".into(),
+                "   ".into(),
+                String::new(),
+            ],
+        )
+        .unwrap();
+        assert_eq!(got.tags, ["db", "rust"]);
+    }
+
+    /// The write is a replace, not a merge: the old rows go.
+    #[test]
+    fn set_tags_replaces_the_whole_set() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "a", None, None).unwrap();
+        set_task_tags(&mut conn, &t.id, &["rust".into(), "db".into()]).unwrap();
+
+        let got = set_task_tags(&mut conn, &t.id, &["ci".into()]).unwrap();
+        assert_eq!(got.tags, ["ci"]);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "replaced, not merged");
+    }
+
+    #[test]
+    fn set_tags_clears_with_an_empty_slice() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "a", None, None).unwrap();
+        set_task_tags(&mut conn, &t.id, &["rust".into()]).unwrap();
+
+        let got = set_task_tags(&mut conn, &t.id, &[]).unwrap();
+        assert!(got.tags.is_empty());
+    }
+
+    /// The existence check runs before the DELETE, and the failure rolls the
+    /// transaction back — a missing id must not touch another task's rows.
+    #[test]
+    fn set_tags_reports_missing_and_writes_nothing() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "a", None, None).unwrap();
+        set_task_tags(&mut conn, &t.id, &["rust".into()]).unwrap();
+
+        assert!(matches!(
+            set_task_tags(&mut conn, "nope", &["ci".into()]),
+            Err(AppError::NotFound(_))
+        ));
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+    }
+
+    // ---- set_task_deps ----
+
+    #[test]
+    fn set_deps_dedups_and_replaces() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        let c = create_task(&mut conn, "c", None, None).unwrap();
+
+        let got = set_task_deps(
+            &mut conn,
+            &a.id,
+            &[
+                b.id.clone(),
+                b.id.clone(),
+                format!("  {}  ", c.id),
+                String::new(),
+            ],
+        )
+        .unwrap();
+        let mut want = vec![b.id.clone(), c.id.clone()];
+        want.sort();
+        assert_eq!(got.depends_on, want);
+
+        let got = set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+        assert_eq!(got.depends_on, [b.id.clone()]);
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_deps", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "replaced, not merged");
+    }
+
+    #[test]
+    fn set_deps_rejects_a_self_edge() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        assert!(matches!(
+            set_task_deps(&mut conn, &a.id, &[a.id.clone()]),
+            Err(AppError::Invalid(_))
+        ));
+    }
+
+    /// The schema's CHECK only blocks self-edges; A -> B -> C -> A is Rust's job.
+    #[test]
+    fn set_deps_rejects_a_longer_cycle_and_rolls_back() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        let c = create_task(&mut conn, "c", None, None).unwrap();
+        let d = create_task(&mut conn, "d", None, None).unwrap();
+
+        // a -> b -> c, plus a harmless existing edge on c we expect to survive.
+        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &b.id, &[c.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &c.id, &[d.id.clone()]).unwrap();
+
+        // Closing the loop c -> a must be refused.
+        assert!(matches!(
+            set_task_deps(&mut conn, &c.id, &[a.id.clone()]),
+            Err(AppError::Invalid(_))
+        ));
+        assert_eq!(
+            get_task(&conn, &c.id).unwrap().depends_on,
+            [d.id.clone()],
+            "the rejected write rolled back"
+        );
+    }
+
+    /// A diamond is not a cycle: the check must not reject a re-converging graph.
+    #[test]
+    fn set_deps_allows_a_diamond() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        let c = create_task(&mut conn, "c", None, None).unwrap();
+        let d = create_task(&mut conn, "d", None, None).unwrap();
+
+        set_task_deps(&mut conn, &b.id, &[d.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &c.id, &[d.id.clone()]).unwrap();
+        let got = set_task_deps(&mut conn, &a.id, &[b.id.clone(), c.id.clone()]).unwrap();
+        assert_eq!(got.depends_on.len(), 2);
+    }
+
+    #[test]
+    fn set_deps_clears_with_an_empty_slice() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+
+        let got = set_task_deps(&mut conn, &a.id, &[]).unwrap();
+        assert!(got.depends_on.is_empty());
+    }
+
+    #[test]
+    fn set_deps_reports_missing_task() {
+        let mut conn = fresh();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        assert!(matches!(
+            set_task_deps(&mut conn, "nope", &[b.id.clone()]),
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    /// Deleting a task takes its edges with it, in both directions.
+    #[test]
+    fn delete_cascades_to_deps_both_ways() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+
+        delete_task(&conn, &b.id).unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_deps", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+        assert!(get_task(&conn, &a.id).unwrap().depends_on.is_empty());
+    }
+
+    #[test]
+    fn due_must_be_zero_padded() {
+        let mut conn = fresh();
+        for _bad in ["2026-1-10", "2026-01-1"] {
+            assert!(
+                create_task(&mut conn, "t", Some(_bad), None).is_err(),
+                "accepted {_bad:?}"
+            );
+        }
+        assert!(create_task(&mut conn, "t", Some("2026-01-01"), None).is_ok());
     }
 }
