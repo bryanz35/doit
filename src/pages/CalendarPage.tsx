@@ -5,7 +5,7 @@
 import type { DragEvent } from "react";
 import { useState } from "react";
 import { useApp } from "../data/store";
-import { events, todayColumn, unscheduledTaskIds } from "../data/mock";
+import { events, todayColumn } from "../data/mock";
 import type { CalendarEvent } from "../types";
 import { Kbd, Segmented, formatClock, formatMinutes } from "../components/primitives";
 
@@ -47,9 +47,9 @@ export function CalendarPage() {
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropHint, setDropHint] = useState<{ day: number; minutes: number } | null>(null);
 
-  const unscheduled = unscheduledTaskIds
-    .map((id) => tasks.find((task) => task.id === id))
-    .filter((task): task is NonNullable<typeof task> => Boolean(task));
+  // The tray holds real open tasks that have no date on them yet; the grid
+  // itself is still mock data until calendar commands exist.
+  const unscheduled = tasks.filter((task) => task.status !== "done" && !task.due);
 
   const committedMinutes = events
     .filter((event) => !event.ghost)

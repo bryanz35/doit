@@ -1,7 +1,8 @@
 /** Left navigation. Collapsed (64px, screens 1a–1f) or expanded (variation 2c). */
 
+import { useMemo } from "react";
 import type { PageId } from "../types";
-import { lists } from "../data/mock";
+import { useApp } from "../data/store";
 import {
   CalendarIcon,
   FocusIcon,
@@ -36,6 +37,21 @@ interface RailProps {
 }
 
 export function Rail({ page, onNavigate, expanded, onToggleExpanded }: RailProps) {
+  const { tasks } = useApp();
+
+  // Lists are a plain column on `tasks`, not a table of their own, so the rail
+  // counts the open tasks per distinct value. Tasks with no list are grouped
+  // under "Inbox", which is the name the mockups use for the same idea.
+  const lists = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const task of tasks) {
+      if (task.status === "done") continue;
+      const name = task.list ?? "Inbox";
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tasks]);
+
   if (expanded) {
     return (
       <nav className="rail rail-wide" aria-label="Main">
@@ -68,6 +84,9 @@ export function Rail({ page, onNavigate, expanded, onToggleExpanded }: RailProps
         <div className="rail-divider" />
         <div className="rail-lists">
           <h6 style={{ margin: "0 0 8px", color: "var(--color-neutral-700)" }}>Lists</h6>
+          {lists.length === 0 && (
+            <div className="rail-list-row text-muted">No lists yet</div>
+          )}
           {lists.map((list) => (
             <div className="rail-list-row" key={list.name}>
               <span>{list.name}</span>

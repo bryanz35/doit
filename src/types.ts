@@ -1,8 +1,9 @@
-/** Domain types for the UI scaffold.
+/** Domain types shared with the Rust side.
  *
- * These are the shapes the UI renders today from in-memory mock data. When the
- * Rust side lands, these become the deserialized results of `invoke(...)` — keep
- * field names in sync with the serde structs (JS camelCase ↔ Rust snake_case). */
+ * `Task`/`TaskStatus`/`TaskPatch` are the deserialized results of `invoke(...)`
+ * and must stay in step with the serde structs in src-tauri/src/model.rs by hand
+ * (JS camelCase ↔ Rust snake_case) — `invoke<Task>(...)` asserts, it does not
+ * validate. The rest still describe mock data for screens with no backend. */
 
 export type PageId = "tasks" | "calendar" | "focus" | "graph" | "settings";
 
@@ -22,7 +23,8 @@ export interface Task {
   list?: string;
   tags: string[];
   repo?: string;
-  /** Clock time the task was completed, for the Completed group. */
+  /** RFC3339 UTC stamp written when the task became done; the Completed group
+   *  formats it for display. */
   completedAt?: string;
   /** ids of tasks this one depends on — drawn as graph edges. */
   dependsOn: string[];
@@ -94,4 +96,16 @@ export interface CalendarAccount {
 export interface TaskListSummary {
   name: string;
   count: number;
+}
+
+/** Partial update sent to the `update_task` command. Every key is optional and
+ *  an absent key means "leave this column alone" — mirrors `TaskPatch` in
+ *  src-tauri/src/model.rs, including its limitation: there is no way to clear a
+ *  field back to null. */
+export interface TaskPatch {
+  title?: string;
+  notes?: string;
+  status?: TaskStatus;
+  due?: string;
+  estimateMinutes?: number;
 }

@@ -12,6 +12,18 @@ const LAYOUTS = ["List", "Table"] as const;
 type Filter = (typeof FILTERS)[number];
 type Layout = (typeof LAYOUTS)[number];
 
+/** `completedAt` arrives as the UTC RFC3339 stamp the database writes. Show the
+ *  local clock time for anything finished today, the weekday before that. */
+function completedLabel(completedAt: string | undefined, today: string): string {
+  if (!completedAt) return "";
+  const at = new Date(completedAt);
+  if (Number.isNaN(at.getTime())) return completedAt;
+  const local = `${at.getFullYear()}-${`${at.getMonth() + 1}`.padStart(2, "0")}-${`${at.getDate()}`.padStart(2, "0")}`;
+  return local === today
+    ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : at.toLocaleDateString(undefined, { weekday: "short" });
+}
+
 /** "Yesterday" / "Today" / "Fri 22" — how the mockups label a due date. */
 function dueLabel(task: Task, today: string): string {
   if (!task.due) return "Someday";
@@ -22,7 +34,7 @@ function dueLabel(task: Task, today: string): string {
 }
 
 export function TasksPage() {
-  const { tasks, today, selectedTaskId, selectTask, toggleTask, addTask } = useApp();
+  const { tasks, today, loaded, error, selectedTaskId, selectTask, toggleTask, addTask } = useApp();
   const [filter, setFilter] = useState<Filter>("Open");
   const [layout, setLayout] = useState<Layout>("List");
   const [draft, setDraft] = useState("");
@@ -95,7 +107,7 @@ export function TasksPage() {
       ) : (
         <span className="text-muted row-trailing">
           {task.status === "done"
-            ? task.completedAt
+            ? completedLabel(task.completedAt, today)
             : task.pomodoros
               ? `${task.pomodoros} × 25m`
               : formatMinutes(task.estimateMinutes)}
@@ -109,7 +121,11 @@ export function TasksPage() {
       <header className="topbar">
         <h4>Today</h4>
         <span className="text-muted meta" style={{ fontSize: 13 }}>
-          Friday, 14 August
+          {new Date(`${today}T00:00:00`).toLocaleDateString(undefined, {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+          })}
         </span>
         <div className="topbar-right">
           <Segmented options={LAYOUTS} value={layout} onChange={setLayout} />
@@ -125,8 +141,20 @@ export function TasksPage() {
         </div>
       </header>
 
+      {/* `.body` is a row (list + detail pane), so the failure banner sits
+          above it rather than inside. */}
+      {error && (
+        <div className="banner" role="alert">
+          {error}
+        </div>
+      )}
+
       <div className="body">
-        {isEmpty ? (
+        {!loaded ? (
+          <div className="empty">
+            <div className="empty-inner text-muted">Loading tasks…</div>
+          </div>
+        ) : isEmpty ? (
           <EmptyState />
         ) : (
           <div className="tasklist">
@@ -271,7 +299,7 @@ export function TasksPage() {
           </div>
         )}
 
-        {selected && !isEmpty && <TaskDetail task={selected} />}
+        {loaded && selected && !isEmpty && <TaskDetail task={selected} />}
       </div>
     </>
   );
@@ -353,8 +381,7 @@ function EmptyState() {
         <div className="empty-mark" />
         <h2 style={{ margin: "0 0 10px" }}>Nothing due today.</h2>
         <p className="text-muted" style={{ fontSize: 15, margin: "0 0 26px", textWrap: "pretty" }}>
-          Eight tasks are scheduled later this week. Add something now, or pull one forward from the
-          calendar.
+          Add something now, or pull one forward from the calendar.
         </p>
         <Rule />
         <div className="empty-keys" style={{ marginTop: 22 }}>

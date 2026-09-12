@@ -63,6 +63,17 @@ body { overflow: hidden; }
   overflow-y: auto;
 }
 
+/* A failed command, shown under the topbar. Accent border, not a filled red
+   block: the design system has one accent and no status colours. */
+.banner {
+  flex: none;
+  padding: 10px 24px;
+  border-bottom: 2px solid var(--color-accent);
+  background: var(--color-accent-100);
+  color: var(--color-accent);
+  font-size: 13px;
+}
+
 /* ── shared bits ───────────────────────────────────────────────────── */
 .meta { flex: none; white-space: nowrap; }
 .kbd {

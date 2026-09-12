@@ -1,152 +1,19 @@
-/** In-memory sample data mirroring the design mockups.
+/** In-memory sample data for the screens that have no backend yet.
  *
- * BACKEND SEAM: every export here is what a Tauri command will eventually
- * return. Replace the bodies of `src/data/store.ts` with `invoke(...)` calls and
- * this file can be deleted. */
+ * BACKEND SEAM: tasks now come from SQLite through `src/data/store.tsx`; what is
+ * left here is calendar events, graph nodes and settings accounts, which still
+ * have no Tauri commands behind them. Delete each block as its commands land.
+ * The `taskId` fields below point at the design mockup's tasks and resolve to
+ * nothing in a real database — they are placeholders, not lookups. */
 
 import type {
   CalendarAccount,
   CalendarEvent,
   GraphEdge,
   GraphNode,
-  Task,
-  TaskListSummary,
 } from "../types";
 
-/** The mockups are set on Friday 14 August 2026; the sample data is anchored to
- *  that so the "Today"/"Overdue" grouping reads the way it does in the design. */
-export const TODAY = "2026-08-14";
-
-export const tasks: Task[] = [
-  {
-    id: "t-budget",
-    title: "Send the Q3 budget draft to Priya",
-    status: "todo",
-    due: "2026-08-13",
-    estimateMinutes: 25,
-    list: "Work",
-    tags: ["finance"],
-    dependsOn: [],
-  },
-  {
-    id: "t-review",
-    title: "Design review with the platform team",
-    status: "todo",
-    due: TODAY,
-    estimateMinutes: 45,
-    list: "Work",
-    tags: [],
-    dependsOn: [],
-  },
-  {
-    id: "t-onboarding",
-    title: "Rewrite the onboarding empty state",
-    notes:
-      "The zero-task screen currently shows nothing but a heading. Needs a first-run prompt and the keybind legend.",
-    status: "in-progress",
-    due: TODAY,
-    estimateMinutes: 75,
-    pomodoros: 3,
-    list: "Work",
-    tags: ["web", "copy"],
-    repo: "web",
-    dependsOn: ["t-pr"],
-  },
-  {
-    id: "t-auth",
-    title: "Fix flaky auth test on CI",
-    status: "in-progress",
-    due: TODAY,
-    estimateMinutes: 50,
-    list: "Work",
-    tags: [],
-    repo: "api-core",
-    dependsOn: ["t-spec"],
-  },
-  {
-    id: "t-pr",
-    title: "Review PR #2841 — token refresh",
-    status: "todo",
-    due: TODAY,
-    estimateMinutes: 25,
-    list: "Work",
-    tags: [],
-    repo: "api-core",
-    dependsOn: ["t-spec"],
-  },
-  {
-    id: "t-offsite",
-    title: "Book the offsite room",
-    status: "todo",
-    due: TODAY,
-    estimateMinutes: 10,
-    list: "Work",
-    tags: [],
-    dependsOn: [],
-  },
-  {
-    id: "t-migration",
-    title: "Draft migration plan for the events table",
-    status: "todo",
-    due: "2026-08-22",
-    estimateMinutes: 120,
-    list: "Work",
-    tags: [],
-    repo: "api-core",
-    dependsOn: [],
-  },
-  {
-    id: "t-runner",
-    title: "Migrate the CI runner image",
-    status: "todo",
-    list: "Someday",
-    tags: [],
-    repo: "infra",
-    dependsOn: [],
-  },
-  {
-    id: "t-node",
-    title: "Bump Node to 22 in the dev image",
-    status: "done",
-    due: TODAY,
-    estimateMinutes: 20,
-    completedAt: "08:40",
-    list: "Work",
-    tags: [],
-    repo: "infra",
-    dependsOn: [],
-  },
-  {
-    id: "t-vendor",
-    title: "Reply to the vendor security questionnaire",
-    status: "done",
-    due: TODAY,
-    completedAt: "09:15",
-    list: "Work",
-    tags: [],
-    dependsOn: [],
-  },
-  {
-    id: "t-spec",
-    title: "Spec the token refresh flow",
-    status: "done",
-    completedAt: "Tue",
-    list: "Work",
-    tags: [],
-    repo: "api-core",
-    dependsOn: [],
-  },
-];
-
-export const lists: TaskListSummary[] = [
-  { name: "Work", count: 18 },
-  { name: "Home", count: 6 },
-  { name: "Someday", count: 31 },
-];
-
-/** Monday of the week the mockups show (10–16 August 2026). */
-export const weekStart = "2026-08-10";
-/** Column index of "today" within that week. */
+/** Column index of "today" within the week the calendar mockup shows. */
 export const todayColumn = 4;
 
 const hm = (h: number, m = 0) => h * 60 + m;
@@ -163,9 +30,6 @@ export const events: CalendarEvent[] = [
   { id: "e9", title: "Draft migration plan", dayIndex: 4, startMinutes: hm(12), durationMinutes: 60, kind: "task", taskId: "t-migration", subtitle: "12:00 – 13:00", ghost: true },
   { id: "e10", title: "Budget draft → Priya", dayIndex: 4, startMinutes: hm(14), durationMinutes: 30, kind: "external" },
 ];
-
-/** Ids of tasks shown in the calendar's "Unscheduled" tray. */
-export const unscheduledTaskIds = ["t-auth", "t-pr", "t-offsite", "t-migration"];
 
 export const graphNodes: GraphNode[] = [
   { id: "n-spec", taskId: "t-spec", label: "Spec the token refresh flow", kicker: "DONE", x: 90, y: 120, width: 160, variant: "done" },
