@@ -18,7 +18,15 @@ pub fn run() {
             app.manage(db::Db(std::sync::Mutex::new(conn)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::list_tasks])
+        .invoke_handler(tauri::generate_handler![
+            command::list_tasks,
+            command::create_task,
+            command::update_task,
+            command::toggle_task,
+            command::delete_task,
+            command::set_task_tags,
+            command::set_task_deps,
+        ])
         .run(tauri::generate_context!())
         .expect("Error while running tauri application")
 }
