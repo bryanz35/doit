@@ -12,7 +12,8 @@ interface Action {
 }
 
 export function CommandPalette() {
-  const { tasks, paletteOpen, setPaletteOpen, selectTask, setPage } = useApp();
+  const { tasks, paletteOpen, setPaletteOpen, selectTask, setPage, addTask, setComposeOpen } =
+    useApp();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -40,10 +41,38 @@ export function CommandPalette() {
 
   const target = matches[0];
 
-  // TODO(backend): these become scheduling / timer commands once Rust is wired.
+  // TODO(backend): the scheduling / timer actions become real commands once
+  // Rust is wired. Creating is not a stub — it runs `create_task`.
   const actions = useMemo<Action[]>(() => {
-    if (!target) return [];
+    const typed = query.trim();
+    const create: Action = typed
+      ? {
+          id: "create",
+          // Quick-add sigils work here too, so the label echoes the raw line
+          // rather than the parsed title.
+          label: `Create task “${typed}”`,
+          run: () => {
+            void addTask(typed);
+            setPage("tasks");
+          },
+        }
+      : {
+          id: "create-empty",
+          label: "New task…",
+          run: () => {
+            setPage("tasks");
+            setComposeOpen(true);
+          },
+        };
+    // An exact title match means the user is looking for the task they already
+    // have, not making a second one with the same name.
+    const duplicate = typed
+      ? tasks.some((task) => task.title.toLowerCase() === typed.toLowerCase())
+      : false;
+    const head = duplicate ? [] : [create];
+    if (!target) return head;
     return [
+      ...head,
       {
         id: "schedule-today",
         label: `Schedule “${target.title}” → today 12:00`,
@@ -69,7 +98,7 @@ export function CommandPalette() {
         },
       },
     ];
-  }, [target, selectTask, setPage]);
+  }, [target, tasks, query, selectTask, setPage, addTask, setComposeOpen]);
 
   if (!paletteOpen) return null;
 

@@ -13,7 +13,8 @@ import "./styles/design-system.css";
 import "./styles/app.css";
 
 function Shell() {
-  const { page, setPage, paletteOpen, setPaletteOpen, selectTask } = useApp();
+  const { page, setPage, paletteOpen, setPaletteOpen, selectTask, composeOpen, setComposeOpen } =
+    useApp();
   const [railExpanded, setRailExpanded] = useState(false);
 
   useEffect(() => {
@@ -27,7 +28,10 @@ function Shell() {
         return;
       }
       if (event.key === "Escape") {
+        // The compose row handles its own Escape while it holds focus; this is
+        // the fallback for when focus has moved off it.
         if (paletteOpen) setPaletteOpen(false);
+        else if (composeOpen) setComposeOpen(false);
         else selectTask(null);
         return;
       }
@@ -44,7 +48,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, setPage, setPaletteOpen, selectTask]);
+  }, [paletteOpen, composeOpen, setPage, setPaletteOpen, setComposeOpen, selectTask]);
 
   return (
     <div className="shell">

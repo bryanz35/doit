@@ -16,6 +16,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PageId, Task, TaskPatch } from "../types";
+import { parseQuickAdd } from "./quickadd";
 
 interface AppState {
   tasks: Task[];
@@ -23,6 +24,9 @@ interface AppState {
   selectedTaskId: string | null;
   page: PageId;
   paletteOpen: boolean;
+  /** Whether the tasks screen is showing its compose row. Lives here, not in
+   *  TasksPage, so the `N` keybind and the palette can open it from anywhere. */
+  composeOpen: boolean;
 
   /** False until the first `list_tasks` settles, so an empty list can be told
    *  apart from a list that has not arrived yet. */
@@ -33,11 +37,15 @@ interface AppState {
   setPage: (page: PageId) => void;
   selectTask: (id: string | null) => void;
   toggleTask: (id: string) => void;
-  addTask: (title: string) => void;
+  /** Takes one line of quick-add text; resolves to the created row, or null if
+   *  it had no title or the command failed. */
+  addTask: (input: string) => Promise<Task | null>;
   updateTask: (id: string, patch: TaskPatch) => void;
+  setTaskTags: (id: string, tags: string[]) => void;
   deleteTask: (id: string) => void;
   refresh: () => void;
   setPaletteOpen: (open: boolean) => void;
+  setComposeOpen: (open: boolean) => void;
 
   today: string;
   taskById: (id: string | null | undefined) => Task | undefined;
@@ -78,6 +86,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // (handy in the browser during development).
   const [page, setPage] = useState<PageId>(pageFromHash());
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
 
   const [today] = useState(todayIso);
 
@@ -113,25 +122,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [merge],
   );
 
-  const addTask = useCallback(async (title: string) => {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    try {
-      // The id and sort order come from the store, so the created row is
-      // appended as returned rather than guessed at here.
-      const task = await invoke<Task>("create_task", { title: trimmed, due: todayIso() });
-      setTasks((current) => [...current, task]);
-      setSelectedTaskId(task.id);
-      setError(null);
-    } catch (err) {
-      setError(messageOf(err));
-    }
-  }, []);
+  const addTask = useCallback(
+    async (input: string): Promise<Task | null> => {
+      const parsed = parseQuickAdd(input, todayIso());
+      if (!parsed.title) return null;
+      try {
+        // The id and sort order come from the store, so the created row is
+        // appended as returned rather than guessed at here. `due: undefined` is
+        // omitted by Tauri's serializer, which the Option<String> reads as an
+        // unscheduled task — that is what `@someday` asks for.
+        let task = await invoke<Task>("create_task", {
+          title: parsed.title,
+          due: parsed.due ?? undefined,
+          list: parsed.list,
+        });
+        // create_task takes neither of these, so they are follow-up commands.
+        // Each returns the whole row, so the last one wins and stays authoritative.
+        if (parsed.estimateMinutes !== undefined) {
+          task = await invoke<Task>("update_task", {
+            id: task.id,
+            patch: { estimateMinutes: parsed.estimateMinutes },
+          });
+        }
+        if (parsed.tags.length > 0) {
+          task = await invoke<Task>("set_task_tags", { id: task.id, tags: parsed.tags });
+        }
+        setTasks((current) => [...current, task]);
+        setSelectedTaskId(task.id);
+        setError(null);
+        return task;
+      } catch (err) {
+        setError(messageOf(err));
+        return null;
+      }
+    },
+    [],
+  );
 
   const updateTask = useCallback(
     async (id: string, patch: TaskPatch) => {
       try {
         merge(await invoke<Task>("update_task", { id, patch }));
+        setError(null);
+      } catch (err) {
+        setError(messageOf(err));
+      }
+    },
+    [merge],
+  );
+
+  const setTaskTags = useCallback(
+    async (id: string, tags: string[]) => {
+      try {
+        merge(await invoke<Task>("set_task_tags", { id, tags }));
         setError(null);
       } catch (err) {
         setError(messageOf(err));
@@ -157,6 +200,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectedTaskId,
       page,
       paletteOpen,
+      composeOpen,
       loaded,
       error,
       setPage,
@@ -164,9 +208,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleTask,
       addTask,
       updateTask,
+      setTaskTags,
       deleteTask,
       refresh,
       setPaletteOpen,
+      setComposeOpen,
       today,
       taskById: (id) => (id ? tasks.find((task) => task.id === id) : undefined),
     }),
@@ -175,11 +221,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectedTaskId,
       page,
       paletteOpen,
+      composeOpen,
       loaded,
       error,
       toggleTask,
       addTask,
       updateTask,
+      setTaskTags,
       deleteTask,
       refresh,
       today,

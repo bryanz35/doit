@@ -80,7 +80,8 @@ Conventions in the store:
 - Each mutation sends a command and folds the row it returns back into state — the DB is authoritative for ids, `completedAt`, and the trimmed title. No optimistic updates.
 - A rejected `invoke` throws the serialized `AppError` **string**, not an `Error`; `messageOf` handles both.
 - `loaded` distinguishes "no rows" from "not back yet" and `error` holds the last failure; `TasksPage` renders both (a `.banner` under the topbar, a "Loading tasks…" placeholder), so a backend failure no longer looks like an empty list.
-- `updateTask` and `deleteTask` are wired to their commands but no screen calls them yet — the detail pane is read-only. `set_task_tags` / `set_task_deps` have no store function at all.
+- `addTask` takes one line of quick-add text (`src/data/quickadd.ts`: `@due #tag /list =estimate`) and fans it out across `create_task` + the follow-up `update_task` / `set_task_tags` calls create does not cover, folding the last row returned into state.
+- `deleteTask` is wired to its command but no screen calls it yet, and the detail pane is still read-only. `set_task_deps` has no store function at all.
 
 `src/data/mock.ts` is now only the screens with no backend: calendar `events`, `graphNodes`/`graphEdges`, `calendarAccounts`. The rail's list counts and the calendar's unscheduled tray are derived from real tasks. The `taskId` fields left in the mock events and nodes point at the mockup's task ids and resolve to nothing in a real database.
 

@@ -1,10 +1,11 @@
 /** Screen 1a — Today, with the detail pane. Variation 2a adds the dense table.
  *  Screen 1f's inbox-zero state renders when the filter yields nothing. */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../data/store";
 import type { Task } from "../types";
 import { CheckBox, Kbd, Rule, Segmented, formatMinutes } from "../components/primitives";
+import { AddTaskButton, AddTaskRow } from "../components/AddTaskRow";
 
 const FILTERS = ["Open", "Done", "All"] as const;
 const LAYOUTS = ["List", "Table"] as const;
@@ -34,11 +35,43 @@ function dueLabel(task: Task, today: string): string {
 }
 
 export function TasksPage() {
-  const { tasks, today, loaded, error, selectedTaskId, selectTask, toggleTask, addTask } = useApp();
+  const {
+    tasks,
+    today,
+    loaded,
+    error,
+    selectedTaskId,
+    selectTask,
+    toggleTask,
+    paletteOpen,
+    composeOpen,
+    setComposeOpen,
+  } = useApp();
   const [filter, setFilter] = useState<Filter>("Open");
   const [layout, setLayout] = useState<Layout>("List");
-  const [draft, setDraft] = useState("");
-  const [composing, setComposing] = useState(false);
+
+  // `N` opens the compose row. Global keybinds live in App.tsx, but this one is
+  // this screen's own: the shell only routes to the page, it does not know the
+  // row exists.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const el = event.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+      if (paletteOpen) return;
+      if (event.key !== "n" && event.key !== "N") return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      setComposeOpen(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paletteOpen, setComposeOpen]);
+
+  // A newly added task may not match the current filter, which would make the
+  // add look like it failed. Done-only is the only filter that can hide one.
+  useEffect(() => {
+    if (composeOpen && filter === "Done") setFilter("Open");
+  }, [composeOpen, filter]);
 
   const groups = useMemo(() => {
     const visible = tasks.filter((task) => {
@@ -63,12 +96,6 @@ export function TasksPage() {
   const selected = tasks.find((task) => task.id === selectedTaskId);
   const isEmpty =
     groups.overdue.length + groups.today.length + groups.later.length + groups.done.length === 0;
-
-  const submitDraft = () => {
-    addTask(draft);
-    setDraft("");
-    setComposing(false);
-  };
 
   const renderRow = (task: Task) => (
     <div
@@ -133,7 +160,7 @@ export function TasksPage() {
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => setComposing(true)}
+            onClick={() => setComposeOpen(true)}
           >
             New task
             <Kbd onAccent>N</Kbd>
@@ -172,6 +199,7 @@ export function TasksPage() {
                     est. {formatMinutes(totalEstimate)}
                   </span>
                 </div>
+                {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
                 <table className="table">
                   <thead>
                     <tr>
@@ -245,39 +273,7 @@ export function TasksPage() {
                   </>
                 )}
 
-                {composing ? (
-                  <form
-                    className="addrow"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      submitDraft();
-                    }}
-                  >
-                    <span className="box box-add" />
-                    <input
-                      autoFocus
-                      className="palette-input"
-                      placeholder="Add a task…"
-                      value={draft}
-                      onChange={(event) => setDraft(event.currentTarget.value)}
-                      onBlur={submitDraft}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          setDraft("");
-                          setComposing(false);
-                        }
-                      }}
-                    />
-                  </form>
-                ) : (
-                  <button type="button" className="addrow" onClick={() => setComposing(true)}>
-                    <span className="box box-add" />
-                    <span>Add a task…</span>
-                    <span style={{ marginLeft: "auto" }}>
-                      <Kbd>N</Kbd>
-                    </span>
-                  </button>
-                )}
+                {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
 
                 {groups.later.length > 0 && (
                   <>
@@ -372,9 +368,10 @@ function TaskDetail({ task }: { task: Task }) {
   );
 }
 
-/** Screen 1f — inbox zero. */
+/** Screen 1f — inbox zero. "Add something now" is a live compose row here, not
+ *  a pointer at a row that only exists when there is a list to hang it under. */
 function EmptyState() {
-  const { setPaletteOpen, setPage } = useApp();
+  const { setPaletteOpen, setPage, composeOpen, setComposeOpen } = useApp();
   return (
     <div className="empty">
       <div className="empty-inner">
@@ -383,9 +380,17 @@ function EmptyState() {
         <p className="text-muted" style={{ fontSize: 15, margin: "0 0 26px", textWrap: "pretty" }}>
           Add something now, or pull one forward from the calendar.
         </p>
+        <div className="empty-add">{composeOpen ? <AddTaskRow /> : <AddTaskButton />}</div>
         <Rule />
         <div className="empty-keys" style={{ marginTop: 22 }}>
-          <Kbd>N</Kbd>
+          <button
+            type="button"
+            className="kbd"
+            style={{ cursor: "pointer", background: "transparent" }}
+            onClick={() => setComposeOpen(true)}
+          >
+            N
+          </button>
           <span className="text-muted">New task</span>
           <button
             type="button"

@@ -127,6 +127,27 @@ body { overflow: hidden; }
   font: inherit; font-size: 15px; text-align: left;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
+/* Open, the row is a column: the input line, then the parse echo under it. */
+.addrow-open {
+  flex-direction: column; align-items: stretch; gap: 8px;
+  cursor: default; color: var(--color-text);
+  border-top-color: var(--color-accent);
+}
+.addrow-line { display: flex; align-items: center; gap: 12px; }
+.addrow-line .palette-input { flex: 1; min-width: 0; }
+.addrow-hint { display: flex; align-items: center; gap: 6px; flex: none; font-size: 12px; }
+.addrow-echo {
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap; padding-left: 28px; font-size: 12px;
+}
+/* The title is the low-priority half of the echo — the chips are the news. */
+.addrow-echo-title {
+  min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* Inbox zero has no list to sit under, so the row stands alone. */
+.empty-add { width: min(520px, 100%); margin: 0 auto; text-align: left; }
+.empty-add .addrow { margin-top: 0; }
 
 .detail-grid {
   display: grid; grid-template-columns: 88px 1fr;
