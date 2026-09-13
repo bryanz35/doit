@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DOIT — a lightweight TODO desktop app for developers / project managers (see `project-plan.md` for the intended scope: task list, calendar, pomodoro focus timer, whiteboard/graph page, external calendar export; later an LLM command API and Linux dotfile integration).
 
-**Status: tasks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, seven Tauri commands, and a frontend store that calls them. The calendar, focus, graph, and settings screens still render from `src/data/mock.ts` and have no backend at all.
+**Status: tasks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, seven Tauri commands, and a frontend store that calls them. The calendar reads real tasks (no event/external-calendar backend yet); the focus, graph, and settings screens still render from `src/data/mock.ts` and have no backend at all.
 
 Stated preference in `project-plan.md`: the frontend UI is meant to be built with Claude's help; the Rust backend the author writes themselves. Respect that split — don't add Rust commands unprompted.
 
@@ -83,7 +83,9 @@ Conventions in the store:
 - `addTask` takes one line of quick-add text (`src/data/quickadd.ts`: `@due #tag /list =estimate`) and fans it out across `create_task` + the follow-up `update_task` / `set_task_tags` calls create does not cover, folding the last row returned into state.
 - `deleteTask` is wired to its command but no screen calls it yet, and the detail pane is still read-only. `set_task_deps` has no store function at all.
 
-`src/data/mock.ts` is now only the screens with no backend: calendar `events`, `graphNodes`/`graphEdges`, `calendarAccounts`. The rail's list counts and the calendar's unscheduled tray are derived from real tasks. The `taskId` fields left in the mock events and nodes point at the mockup's task ids and resolve to nothing in a real database.
+`src/data/mock.ts` is now only the screens with no backend: `graphNodes`/`graphEdges`, `calendarAccounts`. The rail's list counts are derived from real tasks. The `taskId` fields left in the mock nodes point at the mockup's task ids and resolve to nothing in a real database.
+
+`CalendarPage` renders real tasks over real dates (local `YYYY-MM-DD` strings, Monday-start weeks). `due` has no time, so dated tasks sit in an all-day strip (Week/Day) or month cells, never on the hour grid; the tray is open tasks with no `due`. Dropping a chip on a day calls `updateTask(id, { due })`. `TaskPatch` cannot clear `due`, so there is no drag back into the tray yet.
 
 ### Config coupling
 

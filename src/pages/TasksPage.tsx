@@ -398,7 +398,7 @@ function EmptyState() {
             style={{ cursor: "pointer", background: "transparent" }}
             onClick={() => setPaletteOpen(true)}
           >
-            ⌘K
+            Ctrl-K
           </button>
           <span className="text-muted">Command palette</span>
           <Kbd>3</Kbd>

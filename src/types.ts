@@ -30,24 +30,6 @@ export interface Task {
   dependsOn: string[];
 }
 
-/** A block of real time on the calendar: either an imported external event or a
- *  task the user dragged onto the grid. */
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  /** 0-6, Monday-indexed, within the displayed week. */
-  dayIndex: number;
-  /** Minutes from midnight. */
-  startMinutes: number;
-  durationMinutes: number;
-  /** "task" blocks are ours; "external" ones came from Google/Outlook/iCloud. */
-  kind: "task" | "external";
-  taskId?: string;
-  subtitle?: string;
-  /** Rendered as a drop preview rather than a committed block. */
-  ghost?: boolean;
-}
-
 export interface GraphNode {
   id: string;
   taskId?: string;
