@@ -67,10 +67,10 @@ Registered today: `list_tasks`, `create_task`, `update_task`, `toggle_task`, `de
 
 ### Frontend
 
-The UI is a direct port of the Claude Design project *Todo App Mockups* (`claude.ai/design/p/32715cf1-be3f-42cc-b28f-133756f12562`). Screens map 1:1 to mockup ids: 1a → `TasksPage` list, 2a → its table layout, 1b/2b → `CalendarPage` week/month, 1c → `FocusPage`, 1d → `GraphPage`, 1e → `SettingsPage`, 1f → the empty state + `CommandPalette`, 2c → the expanded rail.
+The UI is self-contained — the screens and the stylesheet in `src/` are the source of truth, with no external design project to sync against. Screens: `TasksPage` (list + table layouts), `CalendarPage` (week/month), `FocusPage`, `GraphPage`, `SettingsPage`, plus the empty state, `CommandPalette`, and the collapsed/expanded rail.
 
-- `src/styles/design-system.css` is vendored **verbatim** from the design project's `_ds/…/styles.css` — tokens plus `.btn`/`.tag`/`.input`/`.seg`/`.table`/`.card` classes. Don't hand-edit it; re-pull it. Note the system is deliberately square (`--radius-*: 0`) and single-accent (`#ec3013`).
-- `src/styles/app.css` holds app chrome only (rail, rows, calendar grid, graph canvas), built from those tokens. New UI should reach for a design-system class first and add here only when the mockups show something the system has no class for.
+- `src/styles/design-system.css` is the design system — tokens plus `.btn`/`.tag`/`.input`/`.seg`/`.table`/`.card` classes. Treat it as the shared vocabulary: extend it deliberately rather than tweaking it per screen. **Keep the established style:** deliberately square (`--radius-*: 0`), single-accent (`#ec3013`), dense type scale, hairline borders over shadows. Anything new must match that; don't introduce rounded corners, a second accent colour, or a competing token set.
+- `src/styles/app.css` holds app chrome only (rail, rows, calendar grid, graph canvas), built from those tokens. New UI should reach for a design-system class first and add here only when the system has no class for it.
 - No router: `page` is state in `src/data/store.tsx`, keybinds `1`–`5` switch it, and the URL hash seeds the initial page so a screen can be deep-linked during development (`http://localhost:1420/#graph`).
 
 **The backend seam** is `src/data/store.tsx` — the only file that calls `invoke`. Pages read state through `useApp()` and never hold data of their own beyond view state. `src/types.ts` holds the shapes both sides must agree on; keep it in step with `model.rs` by hand, since `invoke<Task>(...)` is an unchecked assertion, not validation.
@@ -83,7 +83,7 @@ Conventions in the store:
 - `addTask` takes one line of quick-add text (`src/data/quickadd.ts`: `@due #tag /list =estimate`) and fans it out across `create_task` + the follow-up `update_task` / `set_task_tags` calls create does not cover, folding the last row returned into state.
 - `deleteTask` is wired to its command but no screen calls it yet, and the detail pane is still read-only. `set_task_deps` has no store function at all.
 
-`src/data/mock.ts` is now only the screens with no backend: `graphNodes`/`graphEdges`, `calendarAccounts`. The rail's list counts are derived from real tasks. The `taskId` fields left in the mock nodes point at the mockup's task ids and resolve to nothing in a real database.
+`src/data/mock.ts` is now only the screens with no backend: `graphNodes`/`graphEdges`, `calendarAccounts`. The rail's list counts are derived from real tasks. The `taskId` fields left in the mock nodes point at placeholder task ids and resolve to nothing in a real database.
 
 `CalendarPage` renders real tasks over real dates (local `YYYY-MM-DD` strings, Monday-start weeks). `due` has no time, so dated tasks sit in an all-day strip (Week/Day) or month cells, never on the hour grid; the tray is open tasks with no `due`. Dropping a chip on a day calls `updateTask(id, { due })`. `TaskPatch` cannot clear `due`, so there is no drag back into the tray yet.
 

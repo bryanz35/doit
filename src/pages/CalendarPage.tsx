@@ -148,9 +148,15 @@ interface DragState {
   start: (event: DragEvent, task: Task) => void;
   end: () => void;
   targetProps: (date: string) => {
+    onDragEnter: (event: DragEvent) => void;
     onDragOver: (event: DragEvent) => void;
-    onDragLeave: (event: DragEvent) => void;
     onDrop: (event: DragEvent) => void;
+  };
+  /** Put on the grid root: clears the outline when the drag leaves the grid, and
+   *  makes cell contents transparent to drag events while a drag is in flight. */
+  surfaceProps: {
+    className: string;
+    onDragLeave: (event: DragEvent) => void;
   };
 }
 
@@ -170,16 +176,19 @@ function useTaskDrag(onDropOnDate: (task: Task, date: string) => void): DragStat
     },
     end,
     targetProps: (date) => ({
-      onDragOver: (event) => {
+      // Entering a day is the only thing that moves the outline: dragover fires
+      // many times a second and its relatedTarget-based leave counterpart is
+      // unreliable, so clearing per cell made the outline blink.
+      onDragEnter: (event) => {
         if (!dragging) return;
         event.preventDefault();
-        event.dataTransfer.dropEffect = "move";
-        if (hoverDate !== date) setHoverDate(date);
+        setHoverDate((current) => (current === date ? current : date));
       },
-      onDragLeave: (event) => {
-        // ignore leaves into a child of the same target
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-        setHoverDate((current) => (current === date ? null : current));
+      onDragOver: (event) => {
+        if (!dragging) return;
+        // a drop target has to swallow dragover, or the browser rejects the drop
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
       },
       onDrop: (event) => {
         event.preventDefault();
@@ -187,6 +196,14 @@ function useTaskDrag(onDropOnDate: (task: Task, date: string) => void): DragStat
         end();
       },
     }),
+    surfaceProps: {
+      className: dragging ? "cal-dragging" : "",
+      onDragLeave: (event) => {
+        // only a leave out of the grid itself clears the outline
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setHoverDate(null);
+      },
+    },
   };
 }
 
@@ -425,7 +442,11 @@ function WeekGrid({
       .join(" ");
 
   return (
-    <div className="cal-grid" style={{ "--cal-days": days.length } as CSSProperties}>
+    <div
+      className={`cal-grid ${drag.surfaceProps.className}`.trim()}
+      onDragLeave={drag.surfaceProps.onDragLeave}
+      style={{ "--cal-days": days.length } as CSSProperties}
+    >
       <div className="cal-head">
         <div />
         {days.map((date) => (
@@ -489,7 +510,11 @@ function MonthGrid({
   const month = parseIso(anchor).getMonth();
 
   return (
-    <div style={{ flex: 1, minWidth: 0, padding: "20px 24px", overflowY: "auto" }}>
+    <div
+      className={drag.surfaceProps.className}
+      onDragLeave={drag.surfaceProps.onDragLeave}
+      style={{ flex: 1, minWidth: 0, padding: "20px 24px", overflowY: "auto" }}
+    >
       <div className="month">
         {DOW.map((day) => (
           <div className="month-dow" key={day}>

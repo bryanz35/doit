@@ -290,6 +290,11 @@ body { overflow: hidden; }
   border: 1px dashed var(--color-accent);
 }
 .cal-drop-target { box-shadow: inset 0 0 0 2px var(--color-accent); }
+/* while a drag is in flight only the day cells may see drag events — a chip or the
+   drop preview under the cursor would otherwise fire spurious enter/leave pairs */
+.cal-dragging .month-cell > *,
+.cal-dragging .cal-allday-cell > *,
+.cal-dragging .cal-col > * { pointer-events: none; }
 
 /* ── focus ─────────────────────────────────────────────────────────── */
 .focus-main {
