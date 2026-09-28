@@ -26,6 +26,9 @@ pub fn run() {
             command::delete_task,
             command::set_task_tags,
             command::set_task_deps,
+            command::add_block,
+            command::update_block,
+            command::delete_block,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running tauri application")

@@ -54,3 +54,30 @@ pub fn set_task_deps(db: State<'_, Db>, id: String, depends_on: Vec<String>) -> 
     let mut conn = lock(&db)?;
     tasks::set_task_deps(&mut conn, &id, &depends_on)
 }
+#[tauri::command]
+pub fn add_block(
+    db: State<'_, Db>,
+    block_id: String,
+    start_at: String,
+    end_at: String,
+    tz: Option<String>,
+) -> Result<Task> {
+    let mut conn = lock(&db)?;
+    tasks::add_block(&mut conn, &block_id, &start_at, &end_at, tz.as_deref())
+}
+#[tauri::command]
+pub fn update_block(
+    db: State<'_, Db>,
+    block_id: String,
+    start_at: String,
+    end_at: String,
+    tz: Option<String>,
+) -> Result<Task> {
+    let mut conn = lock(&db)?;
+    tasks::update_block(&mut conn, &block_id, &start_at, &end_at, tz.as_deref())
+}
+#[tauri::command]
+pub fn delete_block(db: State<'_, Db>, id: String) -> Result<()> {
+    let conn = lock(&db)?;
+    tasks::delete_block(&conn, &id)
+}

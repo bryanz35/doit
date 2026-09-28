@@ -12,6 +12,9 @@ pub enum AppError {
     #[error("no task with id {0}")]
     NotFound(String),
 
+    #[error("no calendar block with id {0}")]
+    BlockNotFound(String),
+
     #[error("{0}")]
     Invalid(String),
 

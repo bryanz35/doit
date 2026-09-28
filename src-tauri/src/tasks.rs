@@ -1,5 +1,5 @@
 use crate::error::{AppError, Result};
-use crate::model::{Task, TaskPatch};
+use crate::model::{Task, TaskBlock, TaskPatch};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::collections::{HashMap, HashSet};
 
@@ -7,6 +7,9 @@ use std::collections::{HashMap, HashSet};
 /// up by name, so any SELECT feeding it must list all of these.
 const TASK_COLUMNS: &str =
     "id, title, notes, status, due, estimate_minutes, pomodoros, list, repo, completed_at";
+
+/// Same contract as TASK_COLUMNS, for `row_to_block`.
+const BLOCK_COLUMNS: &str = "id, task_id, start_at, end_at, tz";
 
 /// SQLite has no date type; the schema documents `due` as an ISO `YYYY-MM-DD`
 /// string and nothing enforces it, so check it on the way in.
@@ -21,6 +24,79 @@ fn check_due(due: Option<&str>) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The one spelling `task_blocks.start_at` / `end_at` may hold: a UTC instant
+/// as `YYYY-MM-DDTHH:MM:SSZ`, fixed width, no fractional seconds, no `+00:00`.
+///
+/// This is stricter than "a valid RFC3339 timestamp" on purpose. The schema's
+/// `CHECK (end_at > start_at)`, every `ORDER BY start_at`, and the overlap test
+/// in `check_no_overlap` are all *string* comparisons, and those are only
+/// equivalent to comparing instants while every row is spelled identically.
+/// Accepting `2026-09-14T09:00:00-07:00` would store a correct instant that
+/// sorts and compares wrongly against its neighbours, so it is rejected here
+/// and the frontend normalizes to Z before sending.
+///
+/// The round-trip re-format is the same trick `check_due` uses for zero padding:
+/// parse, print canonically, and insist the input already said that.
+fn check_instant(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value)
+        .map_err(|_| AppError::Invalid(format!("timestamp must be RFC3339, received {value:?}")))?
+        .with_timezone(&chrono::Utc);
+    if parsed.format("%Y-%m-%dT%H:%M:%SZ").to_string() != value {
+        return Err(AppError::Invalid(format!(
+            "timestamp must be UTC as YYYY-MM-DDTHH:MM:SSZ, received {value:?}"
+        )));
+    }
+    Ok(parsed)
+}
+
+/// Both ends valid and the span non-empty. The schema repeats the ordering
+/// check, but only as a string compare it cannot justify on its own — this is
+/// where the error message the user sees comes from.
+fn check_span(start_at: &str, end_at: &str) -> Result<()> {
+    let start = check_instant(start_at)?;
+    let end = check_instant(end_at)?;
+    if end <= start {
+        return Err(AppError::Invalid(format!(
+            "block must end after it starts, received {start_at} -> {end_at}"
+        )));
+    }
+    Ok(())
+}
+
+/// Two blocks on the *same* task may not cover the same minute — the user
+/// cannot sit down to one task twice at once, and a calendar that renders it
+/// has nothing sensible to draw. Blocks on *different* tasks are free to
+/// overlap: double-booking yourself is real, and the grid should show it.
+///
+/// `except` is the block being moved, so a resize does not collide with its own
+/// old row. Half-open intervals: touching end-to-start is not an overlap.
+fn check_no_overlap(
+    conn: &Connection,
+    task_id: &str,
+    start_at: &str,
+    end_at: &str,
+    except: Option<&str>,
+) -> Result<()> {
+    let clash: Option<String> = conn
+        .query_row(
+            "SELECT id FROM task_blocks
+             WHERE task_id = ?1
+               AND id IS NOT ?2
+               AND start_at < ?4
+               AND end_at   > ?3
+             LIMIT 1",
+            params![task_id, except, start_at, end_at],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match clash {
+        Some(_) => Err(AppError::Invalid(format!(
+            "block {start_at} -> {end_at} overlaps another block on this task"
+        ))),
+        None => Ok(()),
+    }
 }
 
 pub fn create_task(
@@ -103,6 +179,7 @@ pub fn list_tasks(conn: &Connection) -> Result<Vec<Task>> {
         conn,
         "SELECT task_id, depends_on_id FROM task_deps ORDER BY depends_on_id",
     )?;
+    let mut blocks = collect_blocks(conn)?;
     let sql = format!("SELECT {TASK_COLUMNS} FROM tasks ORDER BY sort_order, created_at");
     let mut tmp = conn.prepare(&sql)?;
     let rows = tmp.query_map([], row_to_task)?;
@@ -111,6 +188,7 @@ pub fn list_tasks(conn: &Connection) -> Result<Vec<Task>> {
     for task in &mut tasks {
         task.tags = tags.remove(&task.id).unwrap_or_default();
         task.depends_on = deps.remove(&task.id).unwrap_or_default();
+        task.blocks = blocks.remove(&task.id).unwrap_or_default();
     }
     Ok(tasks)
 }
@@ -123,6 +201,22 @@ fn collect_pairs(conn: &Connection, sql: &str) -> Result<HashMap<String, Vec<Str
     for row in rows {
         let (key, value) = row?;
         map.entry(key).or_default().push(value);
+    }
+    Ok(map)
+}
+
+/// The blocks for every task at once, same reason as `collect_pairs`: one query
+/// for the table instead of one per task. Not `collect_pairs` itself because
+/// the value is a struct, not a string.
+fn collect_blocks(conn: &Connection) -> Result<HashMap<String, Vec<TaskBlock>>> {
+    let sql = format!("SELECT {BLOCK_COLUMNS} FROM task_blocks ORDER BY start_at, id");
+    let mut tmp = conn.prepare(&sql)?;
+    let rows = tmp.query_map([], row_to_block)?;
+
+    let mut map: HashMap<String, Vec<TaskBlock>> = HashMap::new();
+    for row in rows {
+        let block = row?;
+        map.entry(block.task_id.clone()).or_default().push(block);
     }
     Ok(map)
 }
@@ -142,6 +236,17 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         completed_at: row.get("completed_at")?,
         tags: Vec::new(),
         depends_on: Vec::new(),
+        blocks: Vec::new(),
+    })
+}
+
+fn row_to_block(row: &Row) -> rusqlite::Result<TaskBlock> {
+    Ok(TaskBlock {
+        id: row.get("id")?,
+        task_id: row.get("task_id")?,
+        start_at: row.get("start_at")?,
+        end_at: row.get("end_at")?,
+        tz: row.get("tz")?,
     })
 }
 
@@ -153,12 +258,23 @@ fn get_task(conn: &Connection, id: &str) -> Result<Task> {
         .ok_or_else(|| AppError::NotFound(id.to_string()))?;
     task.tags = tags_for(conn, id)?;
     task.depends_on = deps_for(conn, id)?;
+    task.blocks = blocks_for(conn, id)?;
     Ok(task)
 }
 
 fn tags_for(conn: &Connection, id: &str) -> Result<Vec<String>> {
     let mut tmp = conn.prepare("SELECT tag FROM task_tags WHERE task_id = ?1 ORDER BY tag")?;
     let rows = tmp.query_map(params![id], |r| r.get(0))?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Ordered by start so the calendar can render the list as it arrives; `id`
+/// breaks ties only to keep the order stable between reads.
+fn blocks_for(conn: &Connection, id: &str) -> Result<Vec<TaskBlock>> {
+    let sql =
+        format!("SELECT {BLOCK_COLUMNS} FROM task_blocks WHERE task_id = ?1 ORDER BY start_at, id");
+    let mut tmp = conn.prepare(&sql)?;
+    let rows = tmp.query_map(params![id], row_to_block)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
@@ -261,6 +377,98 @@ fn reaches(edges: &HashMap<String, Vec<String>>, from: &str, to: &str) -> bool {
         stack.extend(edges.get(node).into_iter().flatten().map(String::as_str));
     }
     false
+}
+
+// ---- calendar blocks ----
+//
+// Three narrow mutations rather than one `set_task_blocks(id, &[...])` replace.
+// The replace shape would match set_task_tags/set_task_deps, but those hold
+// values with no identity of their own; a block does. Deleting and reinserting
+// the set would churn ids on every drag, and the focus timer is meant to log
+// sessions against a block — a reference that cannot survive that churn.
+//
+// add/update return the whole `Task`, like every other mutation here, so the
+// store folds one authoritative row back into state; delete returns `()` like
+// `delete_task`, since the caller already knows which block it dropped.
+
+/// Schedule a new span of work on a task. The id is minted here; the caller
+/// sends only the span, which is all a drag onto the grid produces.
+pub fn add_block(
+    conn: &mut Connection,
+    task_id: &str,
+    start_at: &str,
+    end_at: &str,
+    tz: Option<&str>,
+) -> Result<Task> {
+    check_span(start_at, end_at)?;
+    let id = uuid::Uuid::new_v4().to_string();
+
+    let tx = conn.transaction()?;
+    // The foreign key would catch a missing task, but as a constraint error
+    // spelled in SQLite's words. Check first so the frontend gets NotFound.
+    tx.query_row(
+        "SELECT 1 FROM tasks WHERE id = ?1",
+        params![task_id],
+        |_| Ok(()),
+    )
+    .optional()?
+    .ok_or_else(|| AppError::NotFound(task_id.to_string()))?;
+    check_no_overlap(&tx, task_id, start_at, end_at, None)?;
+    tx.execute(
+        "INSERT INTO task_blocks (id, task_id, start_at, end_at, tz)
+        VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, task_id, start_at, end_at, tz],
+    )?;
+    tx.commit()?;
+
+    get_task(conn, task_id)
+}
+
+/// Move or resize a block. Unlike `TaskPatch` this replaces the whole span
+/// rather than patching named fields: a drag or a resize always knows both
+/// ends, and a half-specified span could not be validated against the CHECK
+/// without reading the row back first. `tz` is written as given, so passing
+/// `None` clears it to floating.
+///
+/// The block keeps its id and its task — a block cannot be moved between tasks
+/// here; delete it and add one on the other task.
+pub fn update_block(
+    conn: &mut Connection,
+    block_id: &str,
+    start_at: &str,
+    end_at: &str,
+    tz: Option<&str>,
+) -> Result<Task> {
+    check_span(start_at, end_at)?;
+
+    let tx = conn.transaction()?;
+    let task_id: String = tx
+        .query_row(
+            "SELECT task_id FROM task_blocks WHERE id = ?1",
+            params![block_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| AppError::BlockNotFound(block_id.to_string()))?;
+    // Exclude this block, or resizing it would always collide with its own row.
+    check_no_overlap(&tx, &task_id, start_at, end_at, Some(block_id))?;
+    tx.execute(
+        "UPDATE task_blocks SET start_at = ?2, end_at = ?3, tz = ?4 WHERE id = ?1",
+        params![block_id, start_at, end_at, tz],
+    )?;
+    tx.commit()?;
+
+    get_task(conn, &task_id)
+}
+
+/// Unschedule one block. The task itself is untouched — dropping every block is
+/// how a task goes back to the calendar tray.
+pub fn delete_block(conn: &Connection, block_id: &str) -> Result<()> {
+    let n = conn.execute("DELETE FROM task_blocks WHERE id = ?1", params![block_id])?;
+    if n == 0 {
+        return Err(AppError::BlockNotFound(block_id.to_string()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -660,6 +868,256 @@ mod tests {
             .unwrap();
         assert_eq!(rows, 0);
         assert!(get_task(&conn, &a.id).unwrap().depends_on.is_empty());
+    }
+
+    // ---- calendar blocks ----
+
+    const T9: &str = "2026-09-14T09:00:00Z";
+    const T10: &str = "2026-09-14T10:00:00Z";
+    const T11: &str = "2026-09-14T11:00:00Z";
+    const T12: &str = "2026-09-14T12:00:00Z";
+
+    #[test]
+    fn add_block_reads_back_on_the_task() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+
+        let got = add_block(&mut conn, &t.id, T9, T10, Some("America/Los_Angeles")).unwrap();
+        assert_eq!(got.blocks.len(), 1);
+        let b = &got.blocks[0];
+        assert_eq!(b.task_id, t.id);
+        assert_eq!(b.start_at, T9);
+        assert_eq!(b.end_at, T10);
+        assert_eq!(b.tz.as_deref(), Some("America/Los_Angeles"));
+        assert!(!b.id.is_empty());
+    }
+
+    #[test]
+    fn a_task_holds_many_blocks_ordered_by_start() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        add_block(&mut conn, &t.id, T11, T12, None).unwrap();
+        let got = add_block(&mut conn, &t.id, T9, T10, None).unwrap();
+
+        let starts: Vec<_> = got.blocks.iter().map(|b| b.start_at.as_str()).collect();
+        assert_eq!(starts, [T9, T11], "sorted by start, not insertion order");
+
+        // list_tasks must attach the same thing get_task does.
+        let listed = list_tasks(&conn).unwrap();
+        assert_eq!(listed[0].blocks, got.blocks);
+    }
+
+    #[test]
+    fn a_task_with_no_blocks_has_an_empty_vec() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "unscheduled", None, None).unwrap();
+        assert!(t.blocks.is_empty());
+        assert!(list_tasks(&conn).unwrap()[0].blocks.is_empty());
+    }
+
+    /// The schema CHECK repeats this, but as a string compare it only holds
+    /// while check_instant keeps every row in the same spelling.
+    #[test]
+    fn block_must_end_after_it_starts() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        assert!(matches!(
+            add_block(&mut conn, &t.id, T10, T9, None),
+            Err(AppError::Invalid(_))
+        ));
+        assert!(
+            matches!(
+                add_block(&mut conn, &t.id, T9, T9, None),
+                Err(AppError::Invalid(_))
+            ),
+            "an empty span is not a block"
+        );
+    }
+
+    /// The instants that would store a correct time and then sort wrongly
+    /// against their neighbours. This is the test that protects the SQL CHECK.
+    #[test]
+    fn block_instants_must_be_canonical_utc() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        for bad in [
+            "2026-09-14T09:00:00-07:00", // right instant, wrong sort key
+            "2026-09-14T09:00:00+00:00", // UTC, but not spelled Z
+            "2026-09-14T09:00:00.000Z",  // fractional seconds break fixed width
+            "2026-09-14T09:00Z",         // no seconds, ditto
+            "2026-09-14",                // a date is not an instant
+            "not a time",
+        ] {
+            assert!(
+                matches!(
+                    add_block(&mut conn, &t.id, bad, T12, None),
+                    Err(AppError::Invalid(_))
+                ),
+                "accepted {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn blocks_on_one_task_may_not_overlap() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        add_block(&mut conn, &t.id, T9, T11, None).unwrap();
+
+        assert!(matches!(
+            add_block(&mut conn, &t.id, T10, T12, None),
+            Err(AppError::Invalid(_))
+        ));
+        assert_eq!(get_task(&conn, &t.id).unwrap().blocks.len(), 1);
+
+        // Half-open: starting exactly where the other ended is not an overlap.
+        let got = add_block(&mut conn, &t.id, T11, T12, None).unwrap();
+        assert_eq!(got.blocks.len(), 2);
+    }
+
+    /// Partial overlap is the easy case; containment in either direction is
+    /// what a naive `start BETWEEN ...` predicate would miss.
+    #[test]
+    fn overlap_catches_containment_both_ways() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        add_block(&mut conn, &t.id, T10, T11, None).unwrap();
+
+        // New block swallows the existing one.
+        assert!(matches!(
+            add_block(&mut conn, &t.id, T9, T12, None),
+            Err(AppError::Invalid(_))
+        ));
+        // New block sits entirely inside the existing one.
+        assert!(matches!(
+            add_block(
+                &mut conn,
+                &t.id,
+                "2026-09-14T10:15:00Z",
+                "2026-09-14T10:45:00Z",
+                None
+            ),
+            Err(AppError::Invalid(_))
+        ));
+        // Exactly the same span.
+        assert!(matches!(
+            add_block(&mut conn, &t.id, T10, T11, None),
+            Err(AppError::Invalid(_))
+        ));
+        assert_eq!(get_task(&conn, &t.id).unwrap().blocks.len(), 1);
+    }
+
+    /// Double-booking yourself across two tasks is real, and the calendar
+    /// should draw it rather than refuse the write.
+    #[test]
+    fn blocks_on_different_tasks_may_overlap() {
+        let mut conn = fresh();
+        let a = create_task(&mut conn, "a", None, None).unwrap();
+        let b = create_task(&mut conn, "b", None, None).unwrap();
+        add_block(&mut conn, &a.id, T9, T11, None).unwrap();
+        assert!(add_block(&mut conn, &b.id, T10, T12, None).is_ok());
+    }
+
+    #[test]
+    fn add_block_reports_a_missing_task() {
+        let mut conn = fresh();
+        assert!(matches!(
+            add_block(&mut conn, "nope", T9, T10, None),
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    /// The point of the narrow mutations: a move keeps the block's identity,
+    /// so anything holding the id still resolves.
+    #[test]
+    fn update_block_moves_it_and_keeps_its_id() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        let id = add_block(&mut conn, &t.id, T9, T10, Some("UTC"))
+            .unwrap()
+            .blocks[0]
+            .id
+            .clone();
+
+        let got = update_block(&mut conn, &id, T11, T12, None).unwrap();
+        assert_eq!(got.blocks.len(), 1, "moved, not added");
+        let b = &got.blocks[0];
+        assert_eq!(b.id, id);
+        assert_eq!((b.start_at.as_str(), b.end_at.as_str()), (T11, T12));
+        assert_eq!(b.tz, None, "tz is replaced, so None clears it to floating");
+    }
+
+    /// Without the `except` arm of the overlap test, a block would collide
+    /// with its own row and no block could ever be resized.
+    #[test]
+    fn update_block_does_not_collide_with_itself() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        let id = add_block(&mut conn, &t.id, T9, T11, None).unwrap().blocks[0]
+            .id
+            .clone();
+
+        let got = update_block(&mut conn, &id, T9, T12, None).unwrap();
+        assert_eq!(got.blocks[0].end_at, T12);
+    }
+
+    #[test]
+    fn update_block_rejects_an_overlap_and_rolls_back() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        let first = add_block(&mut conn, &t.id, T9, T10, None).unwrap().blocks[0]
+            .id
+            .clone();
+        add_block(&mut conn, &t.id, T11, T12, None).unwrap();
+
+        assert!(matches!(
+            update_block(&mut conn, &first, T10, T12, None),
+            Err(AppError::Invalid(_))
+        ));
+        let blocks = get_task(&conn, &t.id).unwrap().blocks;
+        assert_eq!(blocks[0].end_at, T10, "the rejected move rolled back");
+    }
+
+    #[test]
+    fn block_mutations_report_a_missing_block() {
+        let mut conn = fresh();
+        assert!(matches!(
+            update_block(&mut conn, "nope", T9, T10, None),
+            Err(AppError::BlockNotFound(_))
+        ));
+        assert!(matches!(
+            delete_block(&conn, "nope"),
+            Err(AppError::BlockNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn delete_block_unschedules_without_touching_the_task() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        let id = add_block(&mut conn, &t.id, T9, T10, None).unwrap().blocks[0]
+            .id
+            .clone();
+        add_block(&mut conn, &t.id, T11, T12, None).unwrap();
+
+        delete_block(&conn, &id).unwrap();
+        let got = get_task(&conn, &t.id).unwrap();
+        assert_eq!(got.blocks.len(), 1);
+        assert_eq!(got.blocks[0].start_at, T11);
+        assert_eq!(got.title, "write");
+    }
+
+    #[test]
+    fn deleting_a_task_takes_its_blocks() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "write", None, None).unwrap();
+        add_block(&mut conn, &t.id, T9, T10, None).unwrap();
+
+        delete_task(&conn, &t.id).unwrap();
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_blocks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 0, "cascade — the fresh() fixture has foreign_keys ON");
     }
 
     #[test]

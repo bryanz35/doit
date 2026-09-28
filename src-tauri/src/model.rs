@@ -70,6 +70,30 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<String>,
     pub depends_on: Vec<String>,
+    /// Calendar blocks, ordered by start. Always present, empty when the task
+    /// has never been scheduled — the frontend never has to test for undefined.
+    pub blocks: Vec<TaskBlock>,
+}
+
+/// One scheduled span of work on a task, as stored in `task_blocks`.
+///
+/// `start_at`/`end_at` are UTC instants spelled exactly `YYYY-MM-DDTHH:MM:SSZ`
+/// (see `tasks::check_instant`) — the schema's CHECK compares them as strings,
+/// so the spelling is load-bearing, not cosmetic. `tz` is the IANA zone the
+/// block was authored in, kept for calendar export; `None` means floating.
+///
+/// Read-only shape: the backend mints ids, so there is no input twin of this
+/// struct. `add_block` takes its fields as arguments and `update_block`
+/// replaces the whole span, which is what a drag or resize produces anyway.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskBlock {
+    pub id: String,
+    pub task_id: String,
+    pub start_at: String,
+    pub end_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tz: Option<String>,
 }
 
 /// Partial update for a task: every field is `None` for "leave this column
