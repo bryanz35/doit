@@ -17,6 +17,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import type { PageId, Task, TaskPatch } from "../types";
 import { parseQuickAdd } from "./quickadd";
+import { localZone } from "./instants";
 
 interface AppState {
   tasks: Task[];
@@ -43,6 +44,14 @@ interface AppState {
   updateTask: (id: string, patch: TaskPatch) => void;
   setTaskTags: (id: string, tags: string[]) => void;
   deleteTask: (id: string) => void;
+  /** Schedule a span of work on a task. `startAt`/`endAt` are canonical UTC
+   *  instants — build them with the helpers in ./instants. The block's id is
+   *  minted by the backend, which returns the whole task back. */
+  addBlock: (taskId: string, startAt: string, endAt: string) => void;
+  /** Move or resize a block. Replaces the whole span: a drag or a resize
+   *  always knows both ends, and the backend has no patch shape for blocks. */
+  updateBlock: (blockId: string, startAt: string, endAt: string) => void;
+  deleteBlock: (blockId: string) => void;
   refresh: () => void;
   setPaletteOpen: (open: boolean) => void;
   setComposeOpen: (open: boolean) => void;
@@ -194,6 +203,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Blocks. add/update return the whole task like every other mutation, so they
+  // fold through `merge`; delete returns nothing, so the row is dropped locally
+  // — the only place in this file where state moves without the backend saying
+  // what the new row looks like.
+  const addBlock = useCallback(
+    async (taskId: string, startAt: string, endAt: string) => {
+      try {
+        merge(await invoke<Task>("add_block", { taskId, startAt, endAt, tz: localZone() }));
+        setError(null);
+      } catch (err) {
+        setError(messageOf(err));
+      }
+    },
+    [merge],
+  );
+
+  const updateBlock = useCallback(
+    async (blockId: string, startAt: string, endAt: string) => {
+      try {
+        merge(await invoke<Task>("update_block", { blockId, startAt, endAt, tz: localZone() }));
+        setError(null);
+      } catch (err) {
+        setError(messageOf(err));
+      }
+    },
+    [merge],
+  );
+
+  // `delete_block` takes `id`, unlike `update_block`'s `blockId` — the arg keys
+  // follow the Rust signatures, which differ.
+  const deleteBlock = useCallback(async (blockId: string) => {
+    try {
+      await invoke<void>("delete_block", { id: blockId });
+      setTasks((current) =>
+        current.map((task) =>
+          task.blocks.some((block) => block.id === blockId)
+            ? { ...task, blocks: task.blocks.filter((block) => block.id !== blockId) }
+            : task,
+        ),
+      );
+      setError(null);
+    } catch (err) {
+      setError(messageOf(err));
+    }
+  }, []);
+
   const value = useMemo<AppState>(
     () => ({
       tasks,
@@ -210,6 +265,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateTask,
       setTaskTags,
       deleteTask,
+      addBlock,
+      updateBlock,
+      deleteBlock,
       refresh,
       setPaletteOpen,
       setComposeOpen,
@@ -229,6 +287,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateTask,
       setTaskTags,
       deleteTask,
+      addBlock,
+      updateBlock,
+      deleteBlock,
       refresh,
       today,
     ],

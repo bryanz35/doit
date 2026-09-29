@@ -6,6 +6,7 @@ import { useApp } from "../data/store";
 import type { Task } from "../types";
 import { CheckBox, Kbd, Rule, Segmented, formatMinutes } from "../components/primitives";
 import { AddTaskButton, AddTaskRow } from "../components/AddTaskRow";
+import { TaskDetail } from "../components/TaskDetail";
 
 const FILTERS = ["Open", "Done", "All"] as const;
 const LAYOUTS = ["List", "Table"] as const;
@@ -298,73 +299,6 @@ export function TasksPage() {
         {loaded && selected && !isEmpty && <TaskDetail task={selected} />}
       </div>
     </>
-  );
-}
-
-function TaskDetail({ task }: { task: Task }) {
-  const { selectTask, setPage } = useApp();
-  return (
-    <aside className="side">
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <h6 style={{ margin: 0, color: "var(--color-neutral-700)" }}>Task</h6>
-        <span style={{ marginLeft: "auto" }}>
-          <Kbd>Esc to close</Kbd>
-        </span>
-      </div>
-      <h4 style={{ margin: 0 }}>{task.title}</h4>
-      {task.notes && (
-        <p className="text-muted" style={{ fontSize: 13, margin: 0, textWrap: "pretty" }}>
-          {task.notes}
-        </p>
-      )}
-      <Rule />
-      <div className="detail-grid">
-        <span className="text-muted">Due</span>
-        <span>{task.due ?? "Someday"}</span>
-        <span className="text-muted">Estimate</span>
-        <span>
-          {task.pomodoros ? `${task.pomodoros} pomodoros · ` : ""}
-          {formatMinutes(task.estimateMinutes)}
-        </span>
-        <span className="text-muted">List</span>
-        <span>{task.list ?? "—"}</span>
-        <span className="text-muted">Graph</span>
-        <span>{task.dependsOn.length} linked nodes</span>
-      </div>
-      <Rule />
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {task.tags.map((tag) => (
-          <span className="tag tag-neutral" key={tag}>
-            {tag}
-          </span>
-        ))}
-        {task.dependsOn.length > 0 && (
-          <span className="tag tag-outline">blocked by {task.dependsOn.length}</span>
-        )}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: "auto" }}>
-        <button
-          type="button"
-          className="btn btn-primary btn-block"
-          onClick={() => {
-            selectTask(task.id);
-            setPage("focus");
-          }}
-        >
-          Start focus session
-          <span style={{ marginLeft: "auto" }}>
-            <Kbd onAccent>F</Kbd>
-          </span>
-        </button>
-        <button
-          type="button"
-          className="btn btn-secondary btn-block"
-          onClick={() => setPage("calendar")}
-        >
-          Schedule on calendar
-        </button>
-      </div>
-    </aside>
   );
 }
 

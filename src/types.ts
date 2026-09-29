@@ -28,6 +28,26 @@ export interface Task {
   completedAt?: string;
   /** ids of tasks this one depends on — drawn as graph edges. */
   dependsOn: string[];
+  /** Calendar blocks, ordered by start. Always present — the backend sends an
+   *  empty array for a task that has never been scheduled. */
+  blocks: TaskBlock[];
+}
+
+/** One scheduled span of work on a task — mirrors `TaskBlock` in model.rs.
+ *
+ *  `startAt`/`endAt` are UTC instants spelled exactly `YYYY-MM-DDTHH:MM:SSZ`.
+ *  The backend rejects any other spelling (no offset, no milliseconds), so
+ *  build them with `toInstant` in src/data/instants.ts rather than
+ *  `Date.toISOString()`, which appends `.sssZ`.
+ *
+ *  `tz` is the IANA zone the block was authored in, kept for calendar export;
+ *  undefined means floating — render in whatever zone the app is in. */
+export interface TaskBlock {
+  id: string;
+  taskId: string;
+  startAt: string;
+  endAt: string;
+  tz?: string;
 }
 
 export interface GraphNode {
