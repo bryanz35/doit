@@ -1,0 +1,18 @@
+services:
+  build:
+    build:
+      context: .
+    image: doit-builder:22.04
+    volumes:
+      - ../:/app                  # the repo, as checked out on the host
+      - doit-node-modules:/app/node_modules
+      - doit-cargo-target:/cargo-target
+      - doit-cargo-registry:/opt/cargo/registry
+    environment:
+      HOST_UID: "${HOST_UID:-1000}"
+      HOST_GID: "${HOST_GID:-1000}"
+
+volumes:
+  doit-node-modules:
+  doit-cargo-target:
+  doit-cargo-registry:
