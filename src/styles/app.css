@@ -76,6 +76,9 @@ body { overflow: hidden; }
 .dt-tray { flex: none; overflow-y: auto; }
 .cal-sum-caption { font-size: 11px; line-height: 14px; color: var(--label-secondary); }
 
+/* a new range slides in sideways (useRangeSlide); keep it off the tray and the window edge */
+.cal-body { overflow-x: clip; }
+.cal-body .dt-tray { position: relative; z-index: 1; }
 .cal-grid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Head, due strip and hour grid are three separate grids that must line up, so
    no column may grow to fit its content (a plain 1fr is minmax(auto, 1fr)).
@@ -86,6 +89,9 @@ body { overflow: hidden; }
 /* the top hour label sits half above its line, so leave it room to show; the
    grid stops at the last hour instead of stretching to the bottom */
 .cal-grid .cal-cols { flex: 1; min-height: 0; overflow-y: auto; align-content: start; padding-top: var(--space-2); }
+/* the hour height is zoomable, so CalendarPage sets it as --hour-px on .cal-grid */
+.cal-grid .dt-hour { height: var(--hour-px, 48px); }
+.cal-grid .dt-col-lines { background-size: 100% var(--hour-px, 48px); }
 
 .cal-due { cursor: pointer; flex: none; }
 .cal-due[draggable="true"] { cursor: grab; }

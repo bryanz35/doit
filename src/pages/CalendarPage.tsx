@@ -18,8 +18,8 @@
  *  The tray is open tasks with no blocks — having a deadline is not the same as
  *  having made time for it, so a dated-but-unblocked task still waits there. */
 
-import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useApp } from "../data/store";
 import type { Task, TaskBlock } from "../types";
 import { atMinutes, clockOf, durationMinutes } from "../data/instants";
@@ -43,12 +43,15 @@ const MONTH_CHIP_LIMIT = 3;
 /** The load bar under a month date measures estimates against this ceiling. */
 const DAY_CAPACITY_MINUTES = 8 * 60;
 
-/** The grid opens on 09:00–16:00, but grows to cover whatever
- *  blocks the visible days actually hold — a block outside the window would
- *  otherwise be invisible and unreachable. */
-const DEFAULT_START_HOUR = 9;
-const DEFAULT_END_HOUR = 16;
-const HOUR_PX = 48;
+/** The grid always spans the whole day; it opens scrolled to this hour, or to
+ *  just before the current time when today is on screen. */
+const DEFAULT_SCROLL_HOUR = 8;
+/** Hour heights the zoom moves between. The real floor is whatever makes the 24
+ *  hours exactly fill the pane, so the grid never stops short of its bottom. */
+const DEFAULT_HOUR_PX = 48;
+const MAX_HOUR_PX = 240;
+/** How hard the wheel zooms: the hour height scales by e^(-deltaY · this). */
+const ZOOM_RATE = 0.002;
 
 /** Everything on the hour grid snaps to this, in minutes: drags, drops, resizes. */
 const SNAP = 15;
@@ -86,6 +89,135 @@ function useNowMinutes() {
     return () => window.clearInterval(timer);
   }, []);
   return minutes;
+}
+
+/** The hour grid's zoom. Ctrl/⌘ + wheel (a trackpad pinch arrives as the same
+ *  event) scales the hour height around the pointer, so the time under it stays
+ *  put; a plain wheel still scrolls. The height never drops below the one that
+ *  fits all 24 hours in the pane, so there is never empty space under 24:00.
+ *  `openAt` is the minute the pane opens scrolled to, read once per mount. */
+function useHourZoom(openAt: number) {
+  const [pane, setPane] = useState<HTMLDivElement | null>(null);
+  const [wanted, setWanted] = useState(DEFAULT_HOUR_PX);
+  const [floor, setFloor] = useState(0);
+  const hourPx = clamp(wanted, floor, Math.max(floor, MAX_HOUR_PX));
+  // A scroll position to restore once the next render is laid out: keep `minute`
+  // `offset` px below the top of the pane. Set only alongside a state change.
+  const anchor = useRef<{ minute: number; offset: number } | null>(null);
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
+  const latest = useRef({ hourPx, floor, openAt });
+  latest.current = { hourPx, floor, openAt };
+
+  useEffect(() => {
+    if (!pane) return;
+    const pad = () => parseFloat(getComputedStyle(pane).paddingTop) || 0;
+    const minuteAt = (offset: number) =>
+      ((pane.scrollTop + offset - pad()) / latest.current.hourPx) * 60;
+
+    anchor.current = { minute: latest.current.openAt, offset: 0 };
+    rerender();
+
+    // The pane's height is set by the window, not by the grid, so this can't loop.
+    const observer = new ResizeObserver(() => {
+      const next = (pane.clientHeight - pad()) / 24;
+      if (next === latest.current.floor) return;
+      anchor.current ??= { minute: minuteAt(0), offset: 0 };
+      setFloor(next);
+    });
+    observer.observe(pane);
+
+    // React's onWheel is passive, and only a non-passive listener can stop the
+    // webview zooming the whole page on Ctrl + wheel.
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const { hourPx: current, floor: low } = latest.current;
+      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY;
+      const next = clamp(current * Math.exp(-delta * ZOOM_RATE), low, Math.max(low, MAX_HOUR_PX));
+      if (next === current) return;
+      const offset = event.clientY - pane.getBoundingClientRect().top;
+      anchor.current = { minute: minuteAt(offset), offset };
+      setWanted(next);
+    };
+    pane.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      observer.disconnect();
+      pane.removeEventListener("wheel", onWheel);
+    };
+  }, [pane]);
+
+  useLayoutEffect(() => {
+    const target = anchor.current;
+    if (!pane || !target) return;
+    anchor.current = null;
+    const pad = parseFloat(getComputedStyle(pane).paddingTop) || 0;
+    pane.scrollTop = pad + (target.minute / 60) * hourPx - target.offset;
+  });
+
+  return { hourPx, paneRef: setPane };
+}
+
+/** Wheel travel, in px, that Shift + wheel needs before it steps the range —
+ *  under one notch of a mouse wheel, so every notch is one step. */
+const WHEEL_STEP_PX = 40;
+
+/** Shift + wheel over `surface` steps the visible range, like the ‹ › buttons:
+ *  down or right is forward. */
+function useWheelStep(surface: RefObject<HTMLElement | null>, step: (delta: number) => void) {
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    let travel = 0;
+    const onWheel = (event: WheelEvent) => {
+      // Ctrl/⌘ belongs to the hour zoom; the tray and the task modal scroll as usual.
+      if (!event.shiftKey || event.ctrlKey || event.metaKey) return;
+      if ((event.target as Element).closest(".dt-tray, .dt-scrim")) return;
+      // Stops the webview turning it into a horizontal scroll.
+      event.preventDefault();
+      // WebKit reports Shift + wheel as horizontal, so take whichever axis moved.
+      const raw = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? raw * 16 : raw;
+      // A change of direction starts over rather than paying off the old travel.
+      travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta;
+      if (Math.abs(travel) < WHEEL_STEP_PX) return;
+      stepRef.current(Math.sign(travel));
+      travel = 0;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [surface]);
+}
+
+/** How far, in px, and how long, in ms, a new range slides in from. */
+const SLIDE_PX = 24;
+const SLIDE_MS = 180;
+
+/** Slides the grid (or month) in from the side the range moved towards whenever
+ *  `anchor` changes, by whatever means — wheel, ‹ ›, Today. A step mid-slide
+ *  cancels the running one, so fast wheeling never queues animations. */
+function useRangeSlide(surface: RefObject<HTMLElement | null>, anchor: string) {
+  const previous = useRef(anchor);
+  useLayoutEffect(() => {
+    const from = previous.current;
+    previous.current = anchor;
+    if (from === anchor || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const grid = surface.current?.querySelector<HTMLElement>(".cal-grid, .cal-month");
+    if (!grid) return;
+    // ISO dates order as strings, so this is "moved forward".
+    const offset = anchor > from ? SLIDE_PX : -SLIDE_PX;
+    for (const running of grid.getAnimations()) running.cancel();
+    grid.animate(
+      [
+        { transform: `translateX(${offset}px)`, opacity: 0 },
+        { transform: "none", opacity: 1 },
+      ],
+      { duration: SLIDE_MS, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    );
+  }, [anchor, surface]);
 }
 
 // ── dates ────────────────────────────────────────────────────────────
@@ -490,6 +622,9 @@ export function CalendarPage() {
         ? addMonths(current, delta)
         : addDays(current, view === "Week" ? delta * 7 : delta),
     );
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useWheelStep(bodyRef, step);
+  useRangeSlide(bodyRef, anchor);
 
   const days = view === "Day" ? [anchor] : weekOf(anchor);
   const weeks = monthWeeks(anchor);
@@ -500,21 +635,15 @@ export function CalendarPage() {
   const segments = useMemo(() => segmentsByDate(tasks, visibleDays), [tasks, visibleDays.join()]);
   const segmentsOn = (date: string) => segments.get(date) ?? [];
 
-  // The hour window has to cover the blocks that are actually there, or a block
-  // at 07:00 would be drawn above the top of the grid and be unreachable.
-  let startHour = DEFAULT_START_HOUR;
-  let endHour = DEFAULT_END_HOUR;
-  for (const list of segments.values()) {
-    for (const seg of list) {
-      startHour = Math.min(startHour, Math.floor(seg.from / 60));
-      endHour = Math.max(endHour, Math.ceil(seg.to / 60));
-    }
-  }
+  const now = new Date();
+  const { hourPx, paneRef } = useHourZoom(
+    days.includes(today) ? Math.max(0, now.getHours() - 1) * 60 : DEFAULT_SCROLL_HOUR * 60,
+  );
 
   // Column geometry, shared by the drop handlers and the resize handler: both
   // need "which minute is this Y", and both measure against the same rect.
   const minutesAtY = (clientY: number, rect: DOMRect) =>
-    startHour * 60 + ((clientY - rect.top) / HOUR_PX) * 60;
+    ((clientY - rect.top) / hourPx) * 60;
 
   const drag = useCalendarDrag(
     {
@@ -604,7 +733,7 @@ export function CalendarPage() {
     setMove({
       block: seg.block,
       task: seg.task,
-      grab: snap(((event.clientY - rect.top) / HOUR_PX) * 60),
+      grab: snap(((event.clientY - rect.top) / hourPx) * 60),
       length: seg.to - seg.from,
       date: seg.date,
       start: seg.from,
@@ -753,7 +882,7 @@ export function CalendarPage() {
         </div>
       )}
 
-      <div className="page-body">
+      <div className="page-body cal-body" ref={bodyRef}>
         <aside className="dt-tray">
           <div className="dt-tray-head">
             Unscheduled{loaded && <span className="dt-count">{unscheduled.length}</span>}
@@ -824,8 +953,8 @@ export function CalendarPage() {
             days={days}
             tasksOn={tasksOn}
             segmentsOn={segmentsOn}
-            startHour={startHour}
-            endHour={endHour}
+            hourPx={hourPx}
+            paneRef={paneRef}
             resize={resize}
             onResizeStart={startResize}
             onResizeMove={moveResize}
@@ -915,8 +1044,8 @@ function WeekGrid({
   days,
   tasksOn,
   segmentsOn,
-  startHour,
-  endHour,
+  hourPx,
+  paneRef,
   resize,
   onResizeStart,
   onResizeMove,
@@ -930,8 +1059,8 @@ function WeekGrid({
   ...chipProps
 }: GridProps & {
   days: string[];
-  startHour: number;
-  endHour: number;
+  hourPx: number;
+  paneRef: (pane: HTMLDivElement | null) => void;
   resize: Resize | null;
   onResizeStart: (event: ReactPointerEvent, seg: Segment, edge: "start" | "end") => void;
   onResizeMove: (event: ReactPointerEvent) => void;
@@ -944,10 +1073,9 @@ function WeekGrid({
   onDeleteBlock: (blockId: string) => void;
 }) {
   const { drag, today } = chipProps;
-  const hours = Array.from({ length: endHour - startHour }, (_, i) => startHour + i);
+  const hours = Array.from({ length: 24 }, (_, i) => i);
   const nowMinutes = useNowMinutes();
-  const showNow = nowMinutes >= startHour * 60 && nowMinutes <= endHour * 60;
-  const yFor = (minutes: number) => ((minutes - startHour * 60) / 60) * HOUR_PX;
+  const yFor = (minutes: number) => (minutes / 60) * hourPx;
 
   const cellClass = (base: string, date: string) =>
     [base, isWeekend(date) ? "dt-col-weekend" : "", drag.hoverDate === date ? "cal-drop-target" : ""]
@@ -958,7 +1086,7 @@ function WeekGrid({
     <div
       className={`dt-cal cal-grid ${drag.surfaceProps.className}`.trim()}
       onDragLeave={drag.surfaceProps.onDragLeave}
-      style={{ "--days": days.length } as CSSProperties}
+      style={{ "--days": days.length, "--hour-px": `${hourPx}px` } as CSSProperties}
     >
       <div className="dt-week">
         <div />
@@ -985,7 +1113,7 @@ function WeekGrid({
         ))}
       </div>
 
-      <div className="dt-week cal-cols">
+      <div className="dt-week cal-cols" ref={paneRef}>
         <div className="dt-hours">
           {hours.map((hour) => (
             <div className="dt-hour" key={hour}>
@@ -1026,7 +1154,7 @@ function WeekGrid({
               <div
                 className="dt-event dt-event-ghost"
                 data-color={listColor(drag.task.list)}
-                style={{ top: yFor(drag.hoverMinutes), height: (drag.length / 60) * HOUR_PX }}
+                style={{ top: yFor(drag.hoverMinutes), height: (drag.length / 60) * hourPx }}
               >
                 <div className="dt-event-title">{drag.task.title}</div>
                 <div className="dt-event-time">{formatMinutes(drag.length)}</div>
@@ -1036,7 +1164,7 @@ function WeekGrid({
               <div
                 className="dt-event dt-event-ghost"
                 data-color={listColor(move.task.list)}
-                style={{ top: yFor(move.start), height: (move.length / 60) * HOUR_PX }}
+                style={{ top: yFor(move.start), height: (move.length / 60) * hourPx }}
               >
                 <div className="dt-event-title">{move.task.title}</div>
                 <div className="dt-event-time">
@@ -1045,7 +1173,7 @@ function WeekGrid({
                 </div>
               </div>
             )}
-            {date === today && showNow && <div className="dt-now" style={{ top: yFor(nowMinutes) }} />}
+            {date === today && <div className="dt-now" style={{ top: yFor(nowMinutes) }} />}
           </div>
         ))}
       </div>
@@ -1087,7 +1215,7 @@ function BlockView({
   // backend only hears about it on pointer-up.
   const from = resizing ? resizing.from : seg.from;
   const to = resizing ? resizing.to : seg.to;
-  const height = Math.max(((to - from) / 60) * HOUR_PX, 12);
+  const height = Math.max(yFor(to) - yFor(from), 12);
   // A move carries the block away, so the position it left fades; a copy leaves
   // the original exactly where it is, so it stays solid.
   const leaving = moving !== null && !moving.copy;
