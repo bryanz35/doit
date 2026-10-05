@@ -91,7 +91,12 @@ body { overflow: hidden; }
 .cal-grid .cal-cols { flex: 1; min-height: 0; overflow-y: auto; align-content: start; padding-top: var(--space-2); }
 /* the hour height is zoomable, so CalendarPage sets it as --hour-px on .cal-grid */
 .cal-grid .dt-hour { height: var(--hour-px, 48px); }
-.cal-grid .dt-col-lines { background-size: 100% var(--hour-px, 48px); }
+/* Each hour line is its own element at hour × hourPx. A repeating background
+   tile can't do this: the browser rounds the tile to whole pixels, so at a
+   fractional --hour-px the error piles up down the column and every line jumps
+   whenever the rounding flips during a zoom. */
+.cal-grid .dt-col-lines { background: none; }
+.cal-hour-line { position: absolute; left: 0; right: 0; height: 1px; background: var(--separator); }
 
 .cal-due { cursor: pointer; flex: none; }
 .cal-due[draggable="true"] { cursor: grab; }

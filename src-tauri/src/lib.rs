@@ -2,6 +2,8 @@ mod command;
 mod db;
 mod error;
 mod model;
+#[cfg(target_os = "linux")]
+mod pinch;
 mod tasks;
 
 pub use error::{AppError, Result};
@@ -16,6 +18,10 @@ pub fn run() {
             let dir = app.path().app_data_dir()?;
             let conn = db::open(&dir)?;
             app.manage(db::Db(std::sync::Mutex::new(conn)));
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("main") {
+                pinch::install(&window)?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

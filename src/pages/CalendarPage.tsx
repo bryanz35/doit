@@ -20,6 +20,7 @@
 
 import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, RefObject } from "react";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useApp } from "../data/store";
 import type { Task, TaskBlock } from "../types";
 import { atMinutes, clockOf, durationMinutes } from "../data/instants";
@@ -91,9 +92,13 @@ function useNowMinutes() {
   return minutes;
 }
 
-/** The hour grid's zoom. Ctrl/⌘ + wheel (a trackpad pinch arrives as the same
- *  event) scales the hour height around the pointer, so the time under it stays
- *  put; a plain wheel still scrolls. The height never drops below the one that
+/** One step of a touchpad pinch, from `src-tauri/src/pinch.rs`: WebKitGTK
+ *  never shows the page a pinch, so the backend claims it and forwards it. */
+type Pinch = { factor: number; x: number; y: number };
+
+/** The hour grid's zoom. Ctrl/⌘ + wheel or a touchpad pinch scales the hour
+ *  height around the pointer, so the time under it stays put; a plain wheel
+ *  still scrolls. The height never drops below the one that
  *  fits all 24 hours in the pane, so there is never empty space under 24:00.
  *  `openAt` is the minute the pane opens scrolled to, read once per mount. */
 function useHourZoom(openAt: number) {
@@ -126,22 +131,41 @@ function useHourZoom(openAt: number) {
     });
     observer.observe(pane);
 
+    const zoomBy = (factor: number, clientY: number) => {
+      const { hourPx: current, floor: low } = latest.current;
+      const next = clamp(current * factor, low, Math.max(low, MAX_HOUR_PX));
+      if (next === current) return;
+      const offset = clientY - pane.getBoundingClientRect().top;
+      anchor.current = { minute: minuteAt(offset), offset };
+      setWanted(next);
+    };
+
     // React's onWheel is passive, and only a non-passive listener can stop the
     // webview zooming the whole page on Ctrl + wheel.
     const onWheel = (event: WheelEvent) => {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
-      const { hourPx: current, floor: low } = latest.current;
       const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaY * 16 : event.deltaY;
-      const next = clamp(current * Math.exp(-delta * ZOOM_RATE), low, Math.max(low, MAX_HOUR_PX));
-      if (next === current) return;
-      const offset = event.clientY - pane.getBoundingClientRect().top;
-      anchor.current = { minute: minuteAt(offset), offset };
-      setWanted(next);
+      zoomBy(Math.exp(-delta * ZOOM_RATE), event.clientY);
     };
     pane.addEventListener("wheel", onWheel, { passive: false });
 
+    // A pinch arrives for the whole window, so act only on one over the grid —
+    // not the tray, and not the task modal laid over it.
+    let unlisten: (() => void) | undefined;
+    let gone = false;
+    listen<Pinch>("pinch", ({ payload }) => {
+      const hit = document.elementFromPoint(payload.x, payload.y);
+      if (hit && pane.contains(hit)) zoomBy(payload.factor, payload.y);
+    }).then(
+      (stop) => (gone ? stop() : (unlisten = stop)),
+      // Outside Tauri (`npm run dev` in a browser) there is no event bus.
+      () => {},
+    );
+
     return () => {
+      gone = true;
+      unlisten?.();
       observer.disconnect();
       pane.removeEventListener("wheel", onWheel);
     };
@@ -158,12 +182,19 @@ function useHourZoom(openAt: number) {
   return { hourPx, paneRef: setPane };
 }
 
-/** Wheel travel, in px, that Shift + wheel needs before it steps the range —
- *  under one notch of a mouse wheel, so every notch is one step. */
+/** Horizontal wheel travel, in px, needed before the range steps — under one
+ *  notch of a mouse wheel, so a lone notch is always one step. */
 const WHEEL_STEP_PX = 40;
 
-/** Shift + wheel over `surface` steps the visible range, like the ‹ › buttons:
- *  down or right is forward. */
+/** The least time, in ms, between two steps. A trackpad swipe streams dozens of
+ *  small events, so travel alone would flick through weeks; this paces a long
+ *  swipe to a step every so often instead. */
+const WHEEL_STEP_COOLDOWN_MS = 250;
+
+/** A horizontal wheel over `surface` steps the visible range, like the ‹ ›
+ *  buttons: right is forward. That is a trackpad's left/right swipe, with or
+ *  without Shift, and a mouse's Shift + wheel, which WebKit reports as
+ *  horizontal. A vertical wheel is left alone even with Shift, so it scrolls. */
 function useWheelStep(surface: RefObject<HTMLElement | null>, step: (delta: number) => void) {
   const stepRef = useRef(step);
   stepRef.current = step;
@@ -172,20 +203,28 @@ function useWheelStep(surface: RefObject<HTMLElement | null>, step: (delta: numb
     const el = surface.current;
     if (!el) return;
     let travel = 0;
+    let lastStep = -Infinity;
     const onWheel = (event: WheelEvent) => {
       // Ctrl/⌘ belongs to the hour zoom; the tray and the task modal scroll as usual.
-      if (!event.shiftKey || event.ctrlKey || event.metaKey) return;
+      if (event.ctrlKey || event.metaKey) return;
       if ((event.target as Element).closest(".dt-tray, .dt-scrim")) return;
-      // Stops the webview turning it into a horizontal scroll.
+      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) {
+        // Sideways drift in a vertical scroll must not bank towards a step.
+        travel = 0;
+        return;
+      }
+      // Stops the webview turning it into a horizontal scroll or a back swipe.
       event.preventDefault();
-      // WebKit reports Shift + wheel as horizontal, so take whichever axis moved.
-      const raw = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? raw * 16 : raw;
+      // Travel arriving mid-cooldown is dropped, not banked, so a swipe's tail
+      // (or its momentum) cannot fire a step after the hand has stopped.
+      if (event.timeStamp - lastStep < WHEEL_STEP_COOLDOWN_MS) return;
+      const delta = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? event.deltaX * 16 : event.deltaX;
       // A change of direction starts over rather than paying off the old travel.
       travel = Math.sign(delta) === Math.sign(travel) ? travel + delta : delta;
       if (Math.abs(travel) < WHEEL_STEP_PX) return;
       stepRef.current(Math.sign(travel));
       travel = 0;
+      lastStep = event.timeStamp;
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -1133,7 +1172,11 @@ function WeekGrid({
             onPointerUp={onResizeEnd}
             onPointerCancel={onResizeEnd}
           >
-            <div className="dt-col-lines" />
+            <div className="dt-col-lines">
+              {hours.map((hour) => (
+                <div className="cal-hour-line" key={hour} style={{ top: yFor(hour * 60) }} />
+              ))}
+            </div>
             {segmentsOn(date).map((seg) => (
               <BlockView
                 key={`${seg.block.id}-${seg.date}`}

@@ -27,6 +27,11 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 thiserror = "2"
 
+# Versions match what tauri already pulls in; used only by pinch.rs.
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+webkit2gtk = "2.0"
+
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
 codegen-units = 1

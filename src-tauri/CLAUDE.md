@@ -10,6 +10,7 @@ Layered so the logic is testable without an app handle:
 | `model.rs` | `Task`, `TaskPatch`, `TaskStatus` — the serde/rusqlite shapes shared with `src/types.ts`. |
 | `error.rs` | `AppError` (thiserror) with a hand-written `Serialize` that emits the `#[error(...)]` string, so a rejected `invoke` throws that string in JS. |
 | `db/` | `open()` (pragmas: foreign_keys, WAL, busy_timeout) and `migrations.rs`. |
+| `pinch.rs` | Linux only, called from setup. A capture-phase `GtkGestureZoom` on the webview claims touchpad pinches (otherwise WebKitGTK magnifies the whole page) and emits each step as a `pinch` event for the calendar's zoom. Its `gtk`/`webkit2gtk` deps are pinned to the versions tauri already uses — bump them together with tauri. |
 | `migrations/NNN_*.sql` | Frozen once shipped. Change the schema by appending a file; `user_version` tracks what has run. |
 
 Conventions that matter when adding to `command.rs`:
