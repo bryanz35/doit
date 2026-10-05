@@ -1,4 +1,5 @@
-/** Screen 1b — week view with the unscheduled tray. Variation 2b — month density.
+/** The calendar, in the style of Calendar: week (or day) grid with the
+ *  unscheduled tray, or the month view.
  *  Below NARROW_QUERY the seven columns get too thin to read, so Week falls back to
  *  a single-day grid and the density switch offers only Day and Month.
  *
@@ -22,13 +23,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../data/store";
 import type { Task, TaskBlock } from "../types";
 import { atMinutes, clockOf, durationMinutes } from "../data/instants";
+import { listColor } from "../data/scope";
 import { Kbd, Segmented, formatMinutes } from "../components/primitives";
 import { TaskDetail } from "../components/TaskDetail";
 
 const DENSITIES = ["Day", "Week", "Month"] as const;
 type Density = (typeof DENSITIES)[number];
 
-const DOW = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -36,17 +38,17 @@ const MONTHS = [
 
 const NARROW_QUERY = "(max-width: 960px)";
 
-/** Month cells show this many chips before collapsing the rest into "+N more". */
+/** Month cells show this many lines before collapsing the rest into "N more". */
 const MONTH_CHIP_LIMIT = 3;
 /** The load bar under a month date measures estimates against this ceiling. */
 const DAY_CAPACITY_MINUTES = 8 * 60;
 
-/** The grid opens on 09:00–16:00 as in the mockup, but grows to cover whatever
+/** The grid opens on 09:00–16:00, but grows to cover whatever
  *  blocks the visible days actually hold — a block outside the window would
  *  otherwise be invisible and unreachable. */
 const DEFAULT_START_HOUR = 9;
 const DEFAULT_END_HOUR = 16;
-const HOUR_PX = 88;
+const HOUR_PX = 48;
 
 /** Everything on the hour grid snaps to this, in minutes: drags, drops, resizes. */
 const SNAP = 15;
@@ -145,13 +147,18 @@ const isWeekend = (iso: string) => dowIndex(iso) > 4;
 const dayOfMonth = (iso: string) => parseIso(iso).getDate();
 const monthName = (iso: string) => MONTHS[parseIso(iso).getMonth()];
 
-/** "10 – 16 August", or "28 September – 4 October" across a month boundary. */
-function weekTitle(days: string[]): string {
-  const first = days[0];
-  const last = days[days.length - 1];
-  return monthName(first) === monthName(last)
-    ? `${dayOfMonth(first)} – ${dayOfMonth(last)} ${monthName(last)}`
-    : `${dayOfMonth(first)} ${monthName(first)} – ${dayOfMonth(last)} ${monthName(last)}`;
+/** The toolbar title, Calendar-style: the month in bold and the year in
+ *  regular weight — "October 2026", "September – October 2026" for a week that
+ *  straddles two, "5 October 2026" for a day. */
+function calendarTitle(view: Density, anchor: string, days: string[]): { strong: string; light: string } {
+  const year = String(parseIso(anchor).getFullYear());
+  if (view === "Day") return { strong: `${dayOfMonth(anchor)} ${monthName(anchor)}`, light: year };
+  if (view === "Week") {
+    const first = monthName(days[0]);
+    const last = monthName(days[days.length - 1]);
+    return { strong: first === last ? last : `${first} – ${last}`, light: year };
+  }
+  return { strong: monthName(anchor), light: year };
 }
 
 // ── blocks on the grid ───────────────────────────────────────────────
@@ -249,7 +256,8 @@ function setChipDragImage(event: DragEvent, task: Task) {
   event.dataTransfer.setData("text/plain", task.id);
   event.dataTransfer.effectAllowed = "move";
   const proxy = document.createElement("div");
-  proxy.className = "month-chip month-chip-task cal-drag-proxy";
+  proxy.className = "dt-due cal-drag-proxy";
+  proxy.dataset.color = listColor(task.list);
   proxy.textContent = task.title;
   document.body.appendChild(proxy);
   event.dataTransfer.setDragImage(proxy, 8, 8);
@@ -530,7 +538,7 @@ export function CalendarPage() {
   const justDragged = useRef(false);
 
   const startResize = (event: ReactPointerEvent, seg: Segment, edge: "start" | "end") => {
-    const column = (event.currentTarget as HTMLElement).closest(".cal-col");
+    const column = (event.currentTarget as HTMLElement).closest("[data-cal-date]");
     if (!column) return;
     // Suppress the native drag the block would otherwise start from this press —
     // pulling an edge is a resize, not a move.
@@ -697,116 +705,106 @@ export function CalendarPage() {
   const rangeSegments = visibleDays.flatMap(segmentsOn);
   const blockedMinutes = rangeSegments.reduce((sum, seg) => sum + (seg.to - seg.from), 0);
 
-  const title =
-    view === "Day"
-      ? `${DOW[dowIndex(anchor)].slice(0, 1)}${DOW[dowIndex(anchor)].slice(1).toLowerCase()} ${dayOfMonth(anchor)} ${monthName(anchor)}`
-      : view === "Week"
-        ? weekTitle(days)
-        : `${monthName(anchor)} ${parseIso(anchor).getFullYear()}`;
+  const title = calendarTitle(view, anchor, days);
   const unit = view === "Day" ? "day" : view === "Week" ? "week" : "month";
 
   const chipProps = { drag, selectTask: toggleSelect, selectedTaskId, today };
 
   return (
     <>
-      <header className="topbar">
-        <h4>{title}</h4>
-        <div style={{ display: "flex", gap: 4 }}>
+      <header className="dt-toolbar">
+        <span className="dt-toolbar-title cal-title">
+          {title.strong} <span className="cal-title-year">{title.light}</span>
+        </span>
+        {view === "Day" && (
+          <span className="dt-muted toolbar-meta">
+            {parseIso(anchor).toLocaleDateString(undefined, { weekday: "long" })}
+          </span>
+        )}
+        <div className="dt-toolbar-right">
+          {/* TODO(backend): real sync status from the calendar integration. */}
+          <span className="dt-status dt-status-on cal-sync">Google Calendar · synced 4m ago</span>
           <button
             type="button"
-            className="btn btn-secondary btn-icon"
+            className="dt-btn dt-btn-icon"
             aria-label={`Previous ${unit}`}
             onClick={() => step(-1)}
           >
             ‹
           </button>
+          <button type="button" className="dt-btn" onClick={() => setAnchor(today)}>
+            Today
+          </button>
           <button
             type="button"
-            className="btn btn-secondary btn-icon"
+            className="dt-btn dt-btn-icon"
             aria-label={`Next ${unit}`}
             onClick={() => step(1)}
           >
             ›
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => setAnchor(today)}>
-            Today
-          </button>
-        </div>
-        <div className="topbar-right">
-          {/* TODO(backend): real sync status from the calendar integration. */}
-          <span className="tag tag-neutral meta cal-sync">Google Calendar synced 4m ago</span>
           <Segmented options={options} value={view} onChange={setDensity} />
         </div>
       </header>
 
       {error && (
-        <div className="banner" role="alert">
+        <div className="dt-banner" role="alert">
           {error}
         </div>
       )}
 
-      <div className="body">
-        <aside className="cal-side">
-          <h6 style={{ margin: 0, color: "var(--color-neutral-700)" }}>
-            Unscheduled{loaded ? ` · ${unscheduled.length}` : ""}
-          </h6>
-          <p className="text-muted" style={{ fontSize: 11, margin: 0 }}>
-            Drop on the hour grid to make time for it; on a day header strip to set its due date.
+      <div className="page-body">
+        <aside className="dt-tray">
+          <div className="dt-tray-head">
+            Unscheduled{loaded && <span className="dt-count">{unscheduled.length}</span>}
+          </div>
+          <p className="dt-tray-hint">
+            Drop on the hour grid to make time for it; on the due strip to set its due date.
           </p>
           {!loaded ? (
-            <p className="text-muted" style={{ fontSize: 13, margin: 0 }}>
-              Loading tasks…
-            </p>
+            <p className="dt-tray-hint">Loading tasks…</p>
           ) : unscheduled.length === 0 ? (
-            <p className="text-muted" style={{ fontSize: 13, margin: 0 }}>
-              Every open task has time on the calendar.
-            </p>
+            <p className="dt-tray-hint">Every open task has time on the calendar.</p>
           ) : (
             unscheduled.map((task) => (
               <div
                 key={task.id}
-                className={[
-                  "chip",
-                  drag.task?.id === task.id ? "chip-dragging" : "",
-                  selectedTaskId === task.id ? "chip-selected" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
+                className={drag.task?.id === task.id ? "dt-chip dt-chip-dragging" : "dt-chip"}
+                data-color={listColor(task.list)}
+                aria-selected={selectedTaskId === task.id}
                 draggable
                 onDragStart={(event) => drag.startTask(event, task)}
                 onDragEnd={drag.end}
                 onClick={() => toggleSelect(task.id)}
               >
-                {task.title}
-                <div className="text-muted" style={{ fontSize: 11 }}>
-                  {drag.task?.id === task.id
-                    ? "dragging…"
-                    : [
-                        formatMinutes(task.estimateMinutes),
-                        task.due ? `due ${task.due.slice(5)}` : null,
-                        task.list,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
+                <div>
+                  <div className="dt-chip-title">{task.title}</div>
+                  <div className="dt-chip-meta">
+                    {drag.task?.id === task.id
+                      ? "dragging…"
+                      : [
+                          formatMinutes(task.estimateMinutes),
+                          task.due ? `due ${task.due.slice(5)}` : null,
+                          task.list,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                  </div>
                 </div>
               </div>
             ))
           )}
-          <div style={{ marginTop: "auto", paddingTop: 12, borderTop: "2px solid var(--color-divider)" }}>
-            <div className="text-muted" style={{ fontSize: 11, marginBottom: 6 }}>
-              This {unit}
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+          <div className="dt-tray-sum">
+            <div className="cal-sum-caption">This {unit}</div>
+            <div>
               <span>Blocked · {rangeSegments.length}</span>
-              <span style={{ color: "var(--color-accent-700)" }}>
-                {formatMinutes(blockedMinutes)}
-              </span>
+              <span>{formatMinutes(blockedMinutes)}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <div>
               <span>Due · {dueInRange.length}</span>
               <span>{formatMinutes(sumEstimates(dueInRange))}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+            <div>
               <span>Unscheduled · {unscheduled.length}</span>
               <span>{formatMinutes(sumEstimates(unscheduled))}</span>
             </div>
@@ -844,7 +842,7 @@ export function CalendarPage() {
 
         {/* Same detail the tasks list opens, from a tray chip, a due chip or a
             block — one task detail, wherever the task was clicked. Here it is a
-            centred modal, not a third column: the tray and the grid need the
+            centred sheet, not a third column: the tray and the grid need the
             width, and docking it right left it cramped on narrow windows. */}
         {selected && <TaskDetail task={selected} variant="modal" />}
       </div>
@@ -859,22 +857,24 @@ interface ChipProps {
   today: string;
 }
 
-/** A scheduled task on the grid. Draggable, so it can be moved to another day. */
+/** A deadline in the due strip or a month cell. Draggable, so it can be moved
+ *  to another day. */
 function TaskChip({ task, drag, selectTask, selectedTaskId, today }: ChipProps & { task: Task }) {
   const done = task.status === "done";
   const overdue = !done && task.due !== undefined && task.due < today;
   return (
     <div
       className={[
-        "month-chip",
-        "cal-task-chip",
-        done ? "cal-task-chip-done" : "month-chip-task",
-        overdue ? "cal-task-chip-overdue" : "",
-        selectedTaskId === task.id ? "cal-task-chip-selected" : "",
-        drag.task?.id === task.id ? "cal-task-chip-dragging cal-drag-source" : "",
+        "dt-due",
+        "cal-due",
+        done ? "dt-due-done" : "",
+        overdue ? "dt-due-overdue" : "",
+        drag.task?.id === task.id ? "cal-due-dragging cal-drag-source" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      data-color={listColor(task.list)}
+      aria-selected={selectedTaskId === task.id}
       title={
         task.estimateMinutes !== undefined
           ? `${task.title} · ${formatMinutes(task.estimateMinutes)}`
@@ -890,13 +890,17 @@ function TaskChip({ task, drag, selectTask, selectedTaskId, today }: ChipProps &
   );
 }
 
-/** A dashed stand-in shown in whichever day the dragged task would land on. */
+/** An outlined stand-in shown in whichever day the dragged task would land on. */
 function DropPreview({ drag, date }: { drag: DragState; date: string }) {
   if (!drag.item) return null;
   if (drag.hoverDate !== date || drag.hoverMinutes !== null || drag.item.task.due === date) {
     return null;
   }
-  return <div className="month-chip cal-task-chip cal-task-chip-preview">{drag.item.task.title}</div>;
+  return (
+    <div className="dt-due cal-due-ghost" data-color={listColor(drag.item.task.list)}>
+      {drag.item.task.title}
+    </div>
+  );
 }
 
 interface GridProps extends ChipProps {
@@ -905,8 +909,8 @@ interface GridProps extends ChipProps {
 }
 
 /** Renders the grid for whichever dates it is given — seven for Week, one for Day.
- *  Deadlines go in the all-day strip; blocks are drawn on the hour columns, which
- *  are drop targets for both a new block and a moved one. */
+ *  Deadlines go in the all-day due strip; blocks are drawn on the hour columns,
+ *  which are drop targets for both a new block and a moved one. */
 function WeekGrid({
   days,
   tasksOn,
@@ -946,40 +950,33 @@ function WeekGrid({
   const yFor = (minutes: number) => ((minutes - startHour * 60) / 60) * HOUR_PX;
 
   const cellClass = (base: string, date: string) =>
-    [
-      base,
-      isWeekend(date) ? `${base}-weekend` : "",
-      date === today ? `${base}-today` : "",
-      drag.hoverDate === date ? "cal-drop-target" : "",
-    ]
+    [base, isWeekend(date) ? "dt-col-weekend" : "", drag.hoverDate === date ? "cal-drop-target" : ""]
       .filter(Boolean)
       .join(" ");
 
   return (
     <div
-      className={`cal-grid ${drag.surfaceProps.className}`.trim()}
+      className={`dt-cal cal-grid ${drag.surfaceProps.className}`.trim()}
       onDragLeave={drag.surfaceProps.onDragLeave}
-      style={{ "--cal-days": days.length } as CSSProperties}
+      style={{ "--days": days.length } as CSSProperties}
     >
-      <div className="cal-head">
+      <div className="dt-week">
         <div />
         {days.map((date) => (
-          <div key={date} className={`cal-head-cell${date === today ? " cal-today" : ""}`}>
-            <div className="cal-head-dow text-muted">{DOW[dowIndex(date)]}</div>
-            <div
-              className="cal-head-day"
-              style={isWeekend(date) ? { color: "var(--color-neutral-600)" } : undefined}
-            >
-              {dayOfMonth(date)}
-            </div>
+          <div
+            key={date}
+            className={date === today ? "dt-week-head dt-week-head-today" : "dt-week-head"}
+          >
+            <span className="dt-dow">{DOW[dowIndex(date)]}</span>
+            <span className={date === today ? "dt-today-dot" : "dt-dnum"}>{dayOfMonth(date)}</span>
           </div>
         ))}
       </div>
 
-      <div className="cal-allday">
-        <div className="cal-allday-label text-muted">DUE</div>
+      <div className="dt-week cal-allday">
+        <div className="dt-allday-label">due</div>
         {days.map((date) => (
-          <div key={date} className={cellClass("cal-allday-cell", date)} {...drag.dayProps(date)}>
+          <div key={date} className={cellClass("dt-allday-cell", date)} {...drag.dayProps(date)}>
             {tasksOn(date).map((task) => (
               <TaskChip key={task.id} task={task} {...chipProps} />
             ))}
@@ -988,11 +985,11 @@ function WeekGrid({
         ))}
       </div>
 
-      <div className="cal-cols">
-        <div className="cal-hours">
+      <div className="dt-week cal-cols">
+        <div className="dt-hours">
           {hours.map((hour) => (
-            <div className="cal-hour" key={hour}>
-              {String(hour).padStart(2, "0")}
+            <div className="dt-hour" key={hour}>
+              <div className="dt-gutter-label">{String(hour).padStart(2, "0")}:00</div>
             </div>
           ))}
         </div>
@@ -1002,12 +999,13 @@ function WeekGrid({
             key={date}
             // read back by the move gesture, which hit-tests its way across columns
             data-cal-date={date}
-            className={cellClass("cal-col", date)}
+            className={cellClass("dt-col", date)}
             {...drag.columnProps(date)}
             onPointerMove={onResizeMove}
             onPointerUp={onResizeEnd}
             onPointerCancel={onResizeEnd}
           >
+            <div className="dt-col-lines" />
             {segmentsOn(date).map((seg) => (
               <BlockView
                 key={`${seg.block.id}-${seg.date}`}
@@ -1026,32 +1024,28 @@ function WeekGrid({
             ))}
             {drag.hoverDate === date && drag.hoverMinutes !== null && drag.task && (
               <div
-                className="cal-event cal-event-ghost"
+                className="dt-event dt-event-ghost"
+                data-color={listColor(drag.task.list)}
                 style={{ top: yFor(drag.hoverMinutes), height: (drag.length / 60) * HOUR_PX }}
               >
-                {drag.task.title}
-                <div className="cal-event-sub">{formatMinutes(drag.length)}</div>
+                <div className="dt-event-title">{drag.task.title}</div>
+                <div className="dt-event-time">{formatMinutes(drag.length)}</div>
               </div>
             )}
             {move && move.moved && move.date === date && (
               <div
-                className="cal-event cal-event-ghost"
+                className="dt-event dt-event-ghost"
+                data-color={listColor(move.task.list)}
                 style={{ top: yFor(move.start), height: (move.length / 60) * HOUR_PX }}
               >
-                {move.task.title}
-                <div className="cal-event-sub">
-                  {clockOf(atMinutes(date, move.start))}–
-                  {clockOf(atMinutes(date, move.start + move.length))}
+                <div className="dt-event-title">{move.task.title}</div>
+                <div className="dt-event-time">
+                  {clockOf(atMinutes(date, move.start))} – {clockOf(atMinutes(date, move.start + move.length))}
                   {move.copy ? " · copy" : ""}
                 </div>
               </div>
             )}
-            {date === today && showNow && (
-              <>
-                <div className="cal-now" style={{ top: yFor(nowMinutes) }} />
-                <div className="cal-now-dot" style={{ top: yFor(nowMinutes), left: 0 }} />
-              </>
-            )}
+            {date === today && showNow && <div className="dt-now" style={{ top: yFor(nowMinutes) }} />}
           </div>
         ))}
       </div>
@@ -1093,33 +1087,36 @@ function BlockView({
   // backend only hears about it on pointer-up.
   const from = resizing ? resizing.from : seg.from;
   const to = resizing ? resizing.to : seg.to;
-  const height = Math.max(((to - from) / 60) * HOUR_PX, 14);
+  const height = Math.max(((to - from) / 60) * HOUR_PX, 12);
   // A move carries the block away, so the position it left fades; a copy leaves
   // the original exactly where it is, so it stays solid.
   const leaving = moving !== null && !moving.copy;
   const movable = seg.whole && !resizing;
+  // Under half an hour the title and time share one line.
+  const short = height < 30;
+  const time = `${clockOf(block.startAt)} – ${clockOf(block.endAt)}`;
 
   return (
     <div
       className={[
-        "cal-event",
-        "cal-event-task",
+        "dt-event",
         "cal-block",
-        selectedTaskId === task.id ? "cal-block-selected" : "",
-        leaving ? "cal-block-dragging" : "",
+        leaving ? "dt-event-moving" : "",
         moving ? "cal-block-moving" : "",
         seg.lanes > 1 ? "cal-block-narrow" : "",
-        height < 30 ? "cal-block-short" : "",
+        short ? "dt-event-short" : "",
       ]
         .filter(Boolean)
         .join(" ")}
+      data-color={listColor(task.list)}
+      aria-selected={selectedTaskId === task.id}
       style={{
         top: yFor(from),
         height,
-        left: `calc(3px + ${(seg.lane / seg.lanes) * 100}%)`,
-        width: `calc(${(1 / seg.lanes) * 100}% - 6px)`,
+        left: `calc(2px + ${(seg.lane / seg.lanes) * 100}%)`,
+        width: `calc(${(1 / seg.lanes) * 100}% - 5px)`,
       }}
-      title={`${task.title} · ${clockOf(block.startAt)}–${clockOf(block.endAt)}`}
+      title={`${task.title} · ${time}`}
       // The press is captured by the block, so move and up are handled here
       // rather than on the column: the pointer has to be free to travel across
       // days without the gesture being handed to whatever it passes over.
@@ -1132,17 +1129,16 @@ function BlockView({
         selectTask(task.id);
       }}
     >
-      <div className="cal-block-title">{task.title}</div>
-      {height > 34 && (
-        <div className="cal-event-sub">
-          {clockOf(block.startAt)}–{clockOf(block.endAt)}
-        </div>
-      )}
+      <div className="dt-event-title">
+        {task.title}
+        {short ? ` · ${clockOf(block.startAt)}` : ""}
+      </div>
+      {!short && height > 34 && <div className="dt-event-time">{time}</div>}
       {seg.whole && (
         <>
           <button
             type="button"
-            className="cal-block-x"
+            className="dt-event-x"
             aria-label={`Unschedule ${task.title}`}
             onClick={(event) => {
               event.stopPropagation();
@@ -1171,8 +1167,9 @@ function BlockView({
   );
 }
 
-/** Variation 2b — month grid. The bar under each date is that day's open
- *  estimates against an eight-hour ceiling. */
+/** The month view. Each cell lists its deadlines, then its blocks as dot lines;
+ *  the bar under the date is that day's open estimates against an eight-hour
+ *  ceiling. */
 function MonthGrid({
   anchor,
   weeks,
@@ -1180,19 +1177,18 @@ function MonthGrid({
   segmentsOn,
   ...chipProps
 }: GridProps & { anchor: string; weeks: string[][] }) {
-  const { drag, today } = chipProps;
+  const { drag, today, selectTask } = chipProps;
   const month = parseIso(anchor).getMonth();
 
   return (
     <div
-      className={drag.surfaceProps.className}
+      className={`dt-cal cal-month ${drag.surfaceProps.className}`.trim()}
       onDragLeave={drag.surfaceProps.onDragLeave}
-      style={{ flex: 1, minWidth: 0, padding: "20px 24px", overflowY: "auto" }}
     >
-      <div className="month">
+      <div className="dt-month">
         {DOW.map((day) => (
-          <div className="month-dow" key={day}>
-            {day.slice(0, 1) + day.slice(1).toLowerCase()}
+          <div className="dt-month-dow" key={day}>
+            {day}
           </div>
         ))}
         {weeks.flat().map((date) => {
@@ -1202,70 +1198,53 @@ function MonthGrid({
             dayTasks
               .filter((task) => task.status !== "done")
               .reduce((sum, task) => sum + (task.estimateMinutes ?? 0), 0) / DAY_CAPACITY_MINUTES;
-          const isToday = date === today;
-          const hidden = dayTasks.length - MONTH_CHIP_LIMIT;
+          const shownTasks = dayTasks.slice(0, MONTH_CHIP_LIMIT);
+          const shownSegments = daySegments.slice(0, Math.max(0, MONTH_CHIP_LIMIT - shownTasks.length));
+          const hidden = dayTasks.length + daySegments.length - shownTasks.length - shownSegments.length;
           return (
             <div
               key={date}
               className={[
-                "month-cell",
-                isWeekend(date) ? "month-cell-weekend" : "",
-                isToday ? "month-cell-today" : "",
-                parseIso(date).getMonth() !== month ? "month-cell-outside" : "",
+                "dt-month-cell",
+                isWeekend(date) ? "dt-month-cell-weekend" : "",
+                parseIso(date).getMonth() !== month ? "dt-month-cell-outside" : "",
                 drag.hoverDate === date ? "cal-drop-target" : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
               {...drag.dayProps(date)}
             >
-              <div
-                style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
-              >
-                <div
-                  className={isToday ? undefined : "text-muted"}
-                  style={
-                    isToday
-                      ? { fontSize: 12, color: "var(--color-accent-700)", fontWeight: 600 }
-                      : { fontSize: 12 }
-                  }
-                >
-                  {dayOfMonth(date)}
-                </div>
-                {daySegments.length > 0 && (
-                  <div
-                    className="text-muted"
-                    style={{ fontSize: 10 }}
-                    title={`${daySegments.length} block${daySegments.length === 1 ? "" : "s"} on this day`}
-                  >
-                    ▮{" "}
-                    {formatMinutes(
-                      daySegments.reduce((sum, seg) => sum + (seg.to - seg.from), 0),
-                    )}
-                  </div>
-                )}
-              </div>
+              <span className={date === today ? "dt-mday dt-today-dot" : "dt-mday"}>
+                {dayOfMonth(date)}
+              </span>
               {load > 0 && (
-                <div
-                  className={`month-load${load >= 1 ? " month-load-full" : load >= 0.6 ? " month-load-half" : ""}`}
-                  style={{ width: `${Math.min(1, load) * 100}%` }}
-                />
+                <div className={load >= 1 ? "dt-load dt-load-full" : "dt-load"}>
+                  <i style={{ width: `${Math.min(1, load) * 100}%` }} />
+                </div>
               )}
-              {dayTasks.slice(0, MONTH_CHIP_LIMIT).map((task) => (
+              {shownTasks.map((task) => (
                 <TaskChip key={task.id} task={task} {...chipProps} />
               ))}
-              {hidden > 0 && (
-                <div className="text-muted" style={{ fontSize: 10 }}>
-                  +{hidden} more
+              {shownSegments.map((seg) => (
+                <div
+                  key={`${seg.block.id}-${seg.date}`}
+                  className="dt-mline cal-mline"
+                  data-color={listColor(seg.task.list)}
+                  onClick={() => selectTask(seg.task.id)}
+                >
+                  <span>{seg.task.title}</span>
+                  <span className="dt-mtime">{clockOf(seg.block.startAt)}</span>
                 </div>
-              )}
+              ))}
+              {hidden > 0 && <div className="dt-mmore">{hidden} more</div>}
               <DropPreview drag={drag} date={date} />
             </div>
           );
         })}
       </div>
-      <p className="text-muted" style={{ fontSize: 11, marginTop: 8 }}>
-        The bar under each date is that day's open estimates against an eight-hour ceiling; the
-        figure beside it is time blocked on the hour grid. <Kbd>2</Kbd> returns to the week.
+      <p className="cal-month-note">
+        The bar under each date is that day's open estimates against an eight-hour ceiling.{" "}
+        <Kbd>2</Kbd> returns to the week.
       </p>
     </div>
   );

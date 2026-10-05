@@ -1,10 +1,13 @@
-/** Line icons lifted from the mockups. 24×24 grid, 2px stroke, currentColor. */
+/** Line icons. 24×24 grid, round caps, currentColor; corners rounded (`rx`) to
+ *  match the design system's shapes. `stroke` thickens the small glyphs drawn
+ *  white on a list disc. */
 
 interface IconProps {
   size?: number;
+  stroke?: number;
 }
 
-function Svg({ size = 18, children }: IconProps & { children: React.ReactNode }) {
+function Svg({ size = 18, stroke = 2, children }: IconProps & { children: React.ReactNode }) {
   return (
     <svg
       width={size}
@@ -12,7 +15,7 @@ function Svg({ size = 18, children }: IconProps & { children: React.ReactNode })
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2}
+      strokeWidth={stroke}
       // round caps are load-bearing: TasksIcon's bullets are zero-length segments
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -31,7 +34,7 @@ export const TasksIcon = (props: IconProps) => (
 
 export const CalendarIcon = (props: IconProps) => (
   <Svg {...props}>
-    <rect x="3" y="4" width="18" height="18" />
+    <rect x="3" y="4" width="18" height="18" rx="3" />
     <path d="M3 10h18M8 2v4M16 2v4" />
   </Svg>
 );
@@ -45,8 +48,8 @@ export const FocusIcon = (props: IconProps) => (
 
 export const GraphIcon = (props: IconProps) => (
   <Svg {...props}>
-    <rect x="3" y="3" width="6" height="6" />
-    <rect x="15" y="15" width="6" height="6" />
+    <rect x="3" y="3" width="6" height="6" rx="1.5" />
+    <rect x="15" y="15" width="6" height="6" rx="1.5" />
     <path d="M9 6h6a3 3 0 0 1 3 3v6" />
   </Svg>
 );
@@ -62,5 +65,37 @@ export const SearchIcon = (props: IconProps) => (
   <Svg {...props}>
     <circle cx="11" cy="11" r="7" />
     <path d="M20 20l-4-4" />
+  </Svg>
+);
+
+export const PlusIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 5v14M5 12h14" />
+  </Svg>
+);
+
+export const CheckIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </Svg>
+);
+
+export const AlertIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M12 7v6M12 17h.01" />
+  </Svg>
+);
+
+export const InboxIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <path d="M4 13l2.5-7h11L20 13v6H4z" />
+    <path d="M4 13h5a3 3 0 0 0 6 0h5" />
+  </Svg>
+);
+
+export const InfoIcon = (props: IconProps) => (
+  <Svg {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v6M12 7.5h.01" />
   </Svg>
 );

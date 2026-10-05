@@ -1,275 +1,122 @@
-/* App chrome — classes lifted out of the mockup's inline styles.
-   Everything here builds on the design-system tokens; no new colors. */
+/* App chrome — layout, scrolling and gesture states around the design-system
+   classes. Built only from the tokens in design-system.css; no new colours.
+   Reach for a `dt-*` class first and add here only what the system has no
+   class for. */
 
 html, body, #root { height: 100%; }
 body { overflow: hidden; }
 
 /* ── shell ─────────────────────────────────────────────────────────── */
-.shell { display: flex; height: 100%; position: relative; }
+.shell { display: flex; height: 100%; position: relative; background: var(--window-bg); }
+.dt-rail, .dt-sidebar { flex: none; height: 100%; }
+.dt-sidebar { overflow-y: auto; }
 
-.rail {
-  width: 64px; flex: none;
-  border-right: 2px solid var(--color-divider);
-  display: flex; flex-direction: column; align-items: center;
-  padding: 16px 0; gap: 6px;
-}
-/* The Q.E.D. logo (public/logo.svg) used as a mask, so its color comes from the token, not the file. */
-.rail-mark, .rail-brand-mark, .empty-mark {
-  background: var(--color-accent);
-  -webkit-mask: url("/logo.svg") center / contain no-repeat;
-  mask: url("/logo.svg") center / contain no-repeat;
-}
-.rail-mark { width: 28px; height: 28px; margin-bottom: 14px; }
-.railitem {
-  width: 40px; height: 40px; display: grid; place-items: center;
-  color: var(--color-neutral-700);
-  background: transparent; border: 0; padding: 0; cursor: pointer;
-}
-.railitem:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.railon, .railon:hover { background: var(--color-accent); color: var(--color-bg); }
-.rail-spacer { margin-top: auto; }
+/* The Q.E.D. logo (public/logo.svg) used as a mask, so its colour comes from
+   a token, not the file. */
+.app-mark { --mark: url("/logo.svg"); }
 
-/* expanded rail — variation 2c; collapses back to the 64px rail above */
-.rail-wide {
-  width: 240px; align-items: stretch; padding: 16px 0;
+.sidebar-brand {
+  display: flex; align-items: center; gap: var(--space-2);
+  margin: 0 0 var(--space-3); padding: 0 var(--space-2); height: 28px;
+  border: 0; background: transparent; cursor: pointer; text-align: left;
+  font: 700 15px/20px var(--font-display); color: var(--label);
 }
-.rail-brand {
-  display: flex; align-items: center; gap: 10px; padding: 0 16px 18px;
-}
-.rail-brand-name { font-family: var(--font-heading); font-weight: 800; font-size: 17px; }
-.rail-brand-mark { width: 24px; height: 24px; flex: none; }
-.rail-link {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 16px; font-size: 14px;
-  width: 100%; background: transparent; border: 0; font-family: inherit;
-  color: inherit; text-align: left; cursor: pointer;
-}
-.rail-link:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.rail-link.railon, .rail-link.railon:hover { background: var(--color-accent); color: var(--color-bg); }
-.rail-lists { padding: 0 16px; }
-.rail-list-row { font-size: 13px; padding: 5px 0; display: flex; }
-.rail-divider { height: 2px; background: var(--color-divider); margin: 14px 16px; }
+.sidebar-brand .dt-rail-mark { width: 20px; height: 20px; margin: 0; flex: none; }
+.sidebar-sections { margin-top: var(--space-3); }
 
-.pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--window-bg); }
+.dt-toolbar { flex: none; }
+.toolbar-meta { font-size: 12px; white-space: nowrap; }
+.toolbar-add { color: var(--accent); }
+.dt-banner { flex: none; }
 
-.topbar {
-  height: 60px; flex: none;
-  border-bottom: 2px solid var(--color-divider);
-  display: flex; align-items: center; gap: 16px; padding: 0 24px;
-}
-.topbar h4 { margin: 0; }
-.topbar-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* Everything under the toolbar: a row of columns that each scroll on their own. */
+.page-body { flex: 1; display: flex; min-height: 0; }
+.page-fill { flex: 1; min-width: 0; overflow-y: auto; }
 
-.body { flex: 1; display: flex; min-height: 0; }
-.side {
-  width: 352px; flex: none;
-  border-left: 2px solid var(--color-divider);
-  padding: 22px 24px;
-  display: flex; flex-direction: column; gap: 16px;
-  overflow-y: auto;
+/* ── tasks ─────────────────────────────────────────────────────────── */
+.tasks-scroll { flex: 1; min-width: 0; overflow-y: auto; padding: var(--space-5) 0 var(--space-8); }
+/* rows sit 8px in from the edges so a selection reads as an inset pill; the
+   padding keeps their content on the 20px list gutter */
+.tasks-scroll > div > .dt-row { margin: 0 var(--space-2); padding-left: var(--space-3); padding-right: var(--space-3); }
+.tasks-table { padding-left: var(--space-3); padding-right: var(--space-3); }
+.tasks-table .dt-add, .tasks-table .dt-add-open { margin-left: 2px; margin-right: 2px; margin-bottom: var(--space-2); }
+.tasks-table .dt-table-head .dt-muted { font-size: 12px; }
+.table-total { margin-left: auto; align-self: center; }
+.tasks-table-row { cursor: default; }
+.dt-table .dt-overdue { color: var(--danger); }
+
+.add-echo-title {
+  min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px;
 }
 
-/* The same detail, centred over a dimmed screen instead of docked to the right.
-   The calendar uses this: the tray and the hour grid already want the width, so
-   a third column left the pane too narrow to read. Same dim + border + shadow
-   recipe as the command palette. */
-.scrim {
+.dt-empty .dt-add { margin: 0 0 20px; }
+.empty-link { height: 20px; padding: 0; }
+
+/* The detail docked on the right of the list: the same sheet, flush and flat. */
+.task-sheet-docked {
+  flex: none; height: 100%; overflow-y: auto;
+  border-radius: 0; box-shadow: none; border-left: 1px solid var(--separator);
+}
+/* …or centred over a scrim, as the calendar shows it. */
+.task-scrim {
   position: fixed; inset: 0; z-index: 20;
-  background: color-mix(in srgb, var(--color-neutral-900) 42%, transparent);
-  display: flex; align-items: center; justify-content: center;
-  padding: 32px;
+  display: flex; align-items: center; justify-content: center; padding: var(--space-8);
 }
-.side-modal {
-  width: 420px; max-width: 100%; max-height: 100%;
-  border-left: none;
-  border: 1px solid var(--color-divider);
-  box-shadow: var(--shadow-lg);
-  background: var(--color-bg);
-}
-
-/* A failed command, shown under the topbar. Accent border, not a filled red
-   block: the design system has one accent and no status colours. */
-.banner {
-  flex: none;
-  padding: 10px 24px;
-  border-bottom: 2px solid var(--color-accent);
-  background: var(--color-accent-100);
-  color: var(--color-accent);
-  font-size: 13px;
-}
-
-/* ── shared bits ───────────────────────────────────────────────────── */
-.meta { flex: none; white-space: nowrap; }
-.kbd {
-  display: inline-flex; align-items: center; justify-content: center;
-  vertical-align: middle; box-sizing: border-box;
-  min-width: 18px; min-height: 16px;
-  font: 600 10px/1 ui-monospace, Menlo, monospace;
-  padding: 2px 5px; border: 1px solid var(--color-divider);
-  color: color-mix(in srgb, var(--color-text) 60%, transparent);
-}
-.kbd-on-accent {
-  color: var(--color-bg);
-  border-color: color-mix(in srgb, var(--color-bg) 50%, transparent);
-}
-.rule { height: 2px; background: var(--color-divider); }
-.seg-opt.is-on { background: var(--color-accent); color: var(--color-bg); }
-.seg-opt { user-select: none; }
-
-/* ── task rows ─────────────────────────────────────────────────────── */
-.row {
-  display: flex; align-items: center; gap: 14px;
-  padding: 11px 2px;
-  border-bottom: 1px solid var(--color-divider);
-  font-size: 15px; cursor: pointer;
-}
-.row:last-child { border-bottom: none; }
-.row-selected {
-  background: color-mix(in srgb, var(--color-text) 5%, transparent);
-  box-shadow: inset 3px 0 0 var(--color-accent);
-}
-.row-selected .box { margin-left: 8px; }
-.row-trailing { margin-left: auto; font-size: 12px; }
-.row-done .row-title { text-decoration: line-through; }
-
-.box {
-  display: inline-block; vertical-align: middle;
-  width: 16px; height: 16px; flex: none;
-  border: 1.5px solid var(--color-divider);
-  background: transparent; padding: 0; cursor: pointer;
-}
-.box-overdue { border-color: var(--color-accent); }
-.box-done { background: var(--color-neutral-400); border-color: var(--color-neutral-400); }
-.box-add { border-style: dashed; border-color: var(--color-neutral-400); }
-
-.tasklist { flex: 1; padding: 22px 28px; min-width: 0; overflow-y: auto; }
-.group-head { margin: 26px 0 6px; color: var(--color-neutral-700); }
-.group-head:first-child { margin-top: 0; }
-.group-head-overdue { color: var(--color-accent); }
-.addrow {
-  display: flex; align-items: center; gap: 12px;
-  padding: 12px 2px; margin-top: 6px;
-  border-top: 2px solid var(--color-divider);
-  width: 100%; background: transparent; cursor: pointer;
-  font: inherit; font-size: 15px; text-align: left;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-/* Open, the row is a column: the input line, then the parse echo under it. */
-.addrow-open {
-  flex-direction: column; align-items: stretch; gap: 8px;
-  cursor: default; color: var(--color-text);
-  border-top-color: var(--color-accent);
-}
-.addrow-line { display: flex; align-items: center; gap: 12px; }
-.addrow-line .palette-input { flex: 1; min-width: 0; }
-.addrow-hint { display: flex; align-items: center; gap: 6px; flex: none; font-size: 12px; }
-.addrow-echo {
-  display: flex; align-items: center; gap: 6px;
-  flex-wrap: wrap; padding-left: 28px; font-size: 12px;
-}
-/* The title is the low-priority half of the echo — the chips are the news. */
-.addrow-echo-title {
-  min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap;
-}
-/* Inbox zero has no list to sit under, so the row stands alone. */
-.empty-add { width: min(520px, 100%); margin: 0 auto; text-align: left; }
-.empty-add .addrow { margin-top: 0; }
-
-.detail-grid {
-  display: grid; grid-template-columns: 88px 1fr;
-  row-gap: 10px; font-size: 13px;
-}
-/* the blocks a task is scheduled for, listed in the detail pane */
-.detail-blocks { display: flex; flex-direction: column; }
-.detail-block {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 13px; padding: 2px 0;
-  border-left: 3px solid var(--color-accent); padding-left: 8px;
-  margin-bottom: 4px;
-}
-.detail-block > .btn { margin-left: auto; }
+.task-sheet-modal { max-width: 100%; max-height: 100%; overflow-y: auto; }
+.task-sheet-close { margin-left: auto; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.task-sheet-pad { padding: 0 4px; }
+/* two buttons that don't fit a narrow sheet stack rather than overflow */
+.dt-sheet-actions { flex-wrap: wrap; }
 
 /* ── calendar ──────────────────────────────────────────────────────── */
-.cal-side {
-  width: 236px; flex: none;
-  border-right: 2px solid var(--color-divider);
-  padding: 18px; display: flex; flex-direction: column; gap: 10px;
-  overflow-y: auto;
-}
-.chip {
-  border: 1px solid var(--color-divider);
-  padding: 8px 10px; font-size: 13px;
-  background: var(--color-surface); cursor: grab;
-}
-.chip-dragging {
-  border: 1px dashed var(--color-accent);
-  background: var(--color-accent-100); opacity: 0.6;
-}
+.cal-title { font: 700 22px/28px var(--font-display); }
+.cal-title-year { font-weight: 400; }
+.cal-sync { margin-right: var(--space-2); white-space: nowrap; }
+.dt-tray { flex: none; overflow-y: auto; }
+.cal-sum-caption { font-size: 11px; line-height: 14px; color: var(--label-secondary); }
+
 .cal-grid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.cal-head {
-  display: grid; grid-template-columns: 52px repeat(var(--cal-days, 7), 1fr);
-  border-bottom: 2px solid var(--color-divider);
-}
-.cal-head-cell { padding: 8px; border-left: 1px solid var(--color-divider); }
-.cal-head-dow { font-size: 10px; letter-spacing: 0.08em; }
-.cal-head-day { font-size: 17px; font-weight: 800; }
-.cal-today { background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
-.cal-today .cal-head-dow, .cal-today .cal-head-day { color: var(--color-accent-700); }
-.cal-cols {
-  flex: 1; position: relative; overflow: auto;
-  display: grid; grid-template-columns: 52px repeat(var(--cal-days, 7), 1fr);
-}
-.cal-hours { display: flex; flex-direction: column; }
-.cal-hour {
-  height: 88px; font-size: 10px; color: var(--color-neutral-600);
-  padding: 2px 8px; text-align: right;
-}
-.cal-col {
-  border-left: 1px solid var(--color-divider);
-  padding: 4px 3px; position: relative;
-}
-.cal-col-weekend { background: var(--color-neutral-100); }
-.cal-col-today { background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
-.cal-event {
-  position: absolute; left: 3px; right: 3px;
-  padding: 4px 6px; font-size: 11px;
-  background: var(--color-neutral-200);
-  border-left: 3px solid var(--color-neutral-600);
-  overflow: hidden;
-}
-.cal-event-task {
-  background: var(--color-accent-200);
-  border-left-color: var(--color-accent);
-  color: var(--color-accent-800);
-}
-.cal-event-ghost {
-  background: var(--color-accent-100); color: var(--color-accent-700);
-  border: 1px dashed var(--color-accent); border-left-width: 1px;
-}
-.cal-event-sub { font-size: 10px; opacity: 0.8; }
+/* Head, due strip and hour grid are three separate grids that must line up, so
+   no column may grow to fit its content (a plain 1fr is minmax(auto, 1fr)).
+   The hour grid always shows a scrollbar gutter; the two above reserve the same. */
+.cal-grid .dt-week { grid-template-columns: 48px repeat(var(--days, 7), minmax(0, 1fr)); scrollbar-gutter: stable; overflow-y: hidden; }
+.cal-allday { flex: none; max-height: 132px; }
+.cal-grid .cal-allday { overflow-y: auto; }
+/* the top hour label sits half above its line, so leave it room to show; the
+   grid stops at the last hour instead of stretching to the bottom */
+.cal-grid .cal-cols { flex: 1; min-height: 0; overflow-y: auto; align-content: start; padding-top: var(--space-2); }
+
+.cal-due { cursor: pointer; flex: none; }
+.cal-due[draggable="true"] { cursor: grab; }
+.dt-due[aria-selected="true"] { box-shadow: inset 0 0 0 1.5px var(--c, var(--list-blue)); }
+.cal-due-dragging { opacity: 0.45; }
+.cal-due-ghost { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c, var(--list-blue)); }
+.cal-drop-target { box-shadow: inset 0 0 0 2px var(--focus-ring); }
+/* while a drag is in flight only the day cells may see drag events — a chip or the
+   drop preview under the cursor would otherwise fire spurious enter/leave pairs.
+   The dragged element itself is exempt: a drag whose source stops hit-testing is
+   cancelled outright by the browser, which is what killed every block move. */
+.cal-dragging .dt-month-cell > *:not(.cal-drag-source),
+.cal-dragging .dt-allday-cell > *:not(.cal-drag-source),
+.cal-dragging .dt-col > *:not(.cal-drag-source) { pointer-events: none; }
+
 /* a block — a real span of work, positioned by its own start and end. The inline
-   left/width come from lane packing, so `right` on .cal-event is over-constrained
+   left/width come from lane packing, so `right` on .dt-event is over-constrained
    and dropped; keep it that way. */
 /* moved with pointer events, not an HTML5 drag: touch-action keeps a touch drag
    from scrolling the grid instead, and user-select keeps a Shift+press from
    extending a text selection — which is what swallowed the copy gesture in the
    Linux webview */
-.cal-block { cursor: grab; line-height: 1.25; touch-action: none; user-select: none; }
+.cal-block { touch-action: none; user-select: none; }
 .cal-block-moving { cursor: grabbing; }
-.cal-block-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.cal-block-narrow { font-size: 10px; padding: 2px 4px; }
-.cal-block-selected { outline: 1px solid var(--color-accent); outline-offset: -1px; }
-.cal-block-dragging { opacity: 0.4; }
-.cal-block-x {
-  position: absolute; top: 0; right: 0; width: 16px; height: 16px;
-  display: none; place-items: center;
-  border: 0; padding: 0; line-height: 1; font-size: 12px; cursor: pointer;
-  background: var(--color-accent); color: var(--color-surface);
-}
-.cal-block:hover .cal-block-x, .cal-block:focus-within .cal-block-x { display: grid; }
+.cal-block-narrow { padding-left: 6px; padding-right: 2px; }
+.cal-block .dt-event-x { display: none; }
+.cal-block:hover .dt-event-x,
+.cal-block:focus-within .dt-event-x,
+.cal-block[aria-selected="true"] .dt-event-x { display: block; }
 /* both edges are resize handles: 6px of grab area each, inside the block since
-   .cal-event clips its overflow. The body between them stays a move handle, so
+   .dt-event clips its overflow. The body between them stays a move handle, so
    they are deliberately thin */
 .cal-block-grip {
   position: absolute; left: 0; right: 0; height: 6px;
@@ -277,225 +124,58 @@ body { overflow: hidden; }
 }
 .cal-block-grip-start { top: 0; }
 .cal-block-grip-end { bottom: 0; }
-.cal-block:hover .cal-block-grip { background: var(--color-accent); opacity: 0.5; }
-/* a block 15 minutes tall is 22px: two 6px grips would leave nothing to drag by,
+.cal-block:hover .cal-block-grip { background: var(--c, var(--list-blue)); opacity: 0.35; }
+/* a block 15 minutes tall is 12px: two 6px grips would leave nothing to drag by,
    so the edges give way to the body */
-.cal-block-short .cal-block-grip { height: 4px; }
-/* narrow: Week falls back to Day in CalendarPage (NARROW_QUERY) — keep these in step */
-@media (max-width: 960px) {
-  .cal-sync { display: none; }
-  .cal-side { width: 180px; padding: 14px; }
-  /* tray + grid + detail pane in one narrow window: the pane gives way first.
-     The calendar's detail is a .side-modal and floats over the grid instead. */
-  .side:not(.side-modal) { width: 264px; padding: 16px; }
-  .scrim { padding: 16px; }
-}
-.cal-now { position: absolute; left: 0; right: 0; height: 2px; background: var(--color-accent); }
-.cal-now-dot {
-  position: absolute; width: 12px; height: 12px; margin-left: -6px; margin-top: -5px;
-  background: var(--color-accent); border-radius: 50%;
-}
+.dt-event-short .cal-block-grip { height: 3px; }
+.dt-event-short .dt-event-x { top: -2px; }
 
-/* month density — variation 2b */
-.month {
-  display: grid; grid-template-columns: repeat(7, 1fr);
-  border-top: 2px solid var(--color-divider);
-  border-left: 1px solid var(--color-divider);
-}
-.month-dow {
-  padding: 6px 8px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--color-neutral-700); border-right: 1px solid var(--color-divider);
-}
-.month-cell {
-  min-height: 114px; padding: 6px 8px;
-  border-top: 1px solid var(--color-divider);
-  border-right: 1px solid var(--color-divider);
-}
-.month-cell-weekend { background: var(--color-neutral-100); }
-.month-cell-today { background: color-mix(in srgb, var(--color-accent) 7%, transparent); }
-.month-load { height: 3px; background: var(--color-neutral-300); margin: 6px 0; }
-.month-load-full { background: var(--color-accent); }
-.month-load-half { background: var(--color-accent-300); }
-.month-chip {
-  font-size: 11px; padding: 2px 5px;
-  background: var(--color-neutral-200); margin-bottom: 3px;
-}
-.month-chip-task { background: var(--color-accent-200); color: var(--color-accent-800); }
-.month-cell-outside > * { opacity: 0.45; }
-
-/* real tasks on the calendar — `due` has no time, so they live in an all-day strip */
-.chip-selected { border-color: var(--color-accent); }
-.cal-allday {
-  display: grid; grid-template-columns: 52px repeat(var(--cal-days, 7), 1fr);
-  border-bottom: 2px solid var(--color-divider);
-  max-height: 132px; overflow-y: auto; flex: none;
-}
-.cal-allday-label { font-size: 10px; letter-spacing: 0.08em; padding: 6px 8px; text-align: right; }
-.cal-allday-cell {
-  min-height: 34px; padding: 4px 3px;
-  border-left: 1px solid var(--color-divider); min-width: 0;
-}
-.cal-allday-cell-weekend { background: var(--color-neutral-100); }
-.cal-allday-cell-today { background: color-mix(in srgb, var(--color-accent) 5%, transparent); }
-.cal-task-chip {
-  cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  border-left: 3px solid var(--color-accent);
-}
-.cal-task-chip[draggable="true"] { cursor: grab; }
-.cal-task-chip-done {
-  color: var(--color-neutral-600); text-decoration: line-through;
-  border-left-color: var(--color-neutral-400);
-}
-.cal-task-chip-overdue { border-left-color: var(--color-accent-800); font-weight: 600; }
-.cal-task-chip-selected { outline: 1px solid var(--color-accent); outline-offset: -1px; }
-.cal-task-chip-dragging { opacity: 0.4; }
-.cal-task-chip-preview {
-  background: var(--color-accent-100); color: var(--color-accent-700);
-  border: 1px dashed var(--color-accent);
-}
-.cal-drop-target { box-shadow: inset 0 0 0 2px var(--color-accent); }
-/* while a drag is in flight only the day cells may see drag events — a chip or the
-   drop preview under the cursor would otherwise fire spurious enter/leave pairs.
-   The dragged element itself is exempt: a drag whose source stops hit-testing is
-   cancelled outright by the browser, which is what killed every block move. */
-.cal-dragging .month-cell > *:not(.cal-drag-source),
-.cal-dragging .cal-allday-cell > *:not(.cal-drag-source),
-.cal-dragging .cal-col > *:not(.cal-drag-source) { pointer-events: none; }
-
-/* ── focus ─────────────────────────────────────────────────────────── */
-.focus-main {
-  flex: 1; display: flex; flex-direction: column; justify-content: center;
-  padding: 0 64px; min-width: 0;
-}
-.focus-clock {
-  font-family: var(--font-heading); font-weight: 800;
-  font-size: 168px; line-height: 0.86; letter-spacing: -0.04em;
-  font-variant-numeric: tabular-nums;
-}
-.focus-bar { height: 6px; background: var(--color-neutral-300); margin: 30px 0 12px; }
-.focus-bar-fill { height: 6px; background: var(--color-accent); }
-.pip { width: 26px; height: 26px; border: 1px solid var(--color-divider); }
-.pip-done { background: var(--color-accent); border-color: var(--color-accent); }
-.pip-active { border: 2px solid var(--color-accent); background: var(--color-accent-200); }
-
-/* ── graph ─────────────────────────────────────────────────────────── */
-.graph {
-  flex: 1; position: relative; min-height: 0; overflow: hidden;
-  background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--color-text) 8%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--color-text) 8%, transparent) 1px, transparent 1px);
-  background-size: 32px 32px;
-}
-/* the zoomed layer holds the edges and nodes; the legend and zoom control sit
-   outside it so they keep their size */
-.graph-layer { position: absolute; inset: 0; transform-origin: 0 0; }
-/* an absolutely-positioned <svg> without explicit dimensions falls back to its
-   intrinsic 300×150, so pin it explicitly */
-.graph-edges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.node {
-  position: absolute;
-  background: var(--color-surface);
-  border: 2px solid var(--color-text);
-  padding: 10px 12px; box-shadow: var(--shadow-sm);
-  cursor: grab; user-select: none;
-}
-.node-kicker { font-size: 10px; letter-spacing: 0.08em; }
-.node-title { font-size: 14px; font-weight: 800; line-height: 1.2; }
-.node-selected {
-  background: var(--color-bg); border-color: var(--color-accent);
-  box-shadow: var(--shadow-md);
-}
-.node-selected .node-kicker { color: var(--color-accent); }
-.node-idea { border-style: dashed; border-color: var(--color-neutral-500); }
-.node-done .node-title {
-  text-decoration: line-through; color: var(--color-neutral-600); font-weight: 400;
-}
-.node-port {
-  position: absolute; top: 50%; width: 8px; height: 8px;
-  background: var(--color-accent);
-}
-.graph-legend {
-  position: absolute; left: 24px; bottom: 20px;
-  display: flex; gap: 8px; align-items: center;
-  background: var(--color-bg); border: 1px solid var(--color-divider);
-  padding: 8px 12px; font-size: 11px;
-}
-.graph-zoom {
-  position: absolute; right: 24px; bottom: 20px;
-  display: flex; border: 1px solid var(--color-divider); background: var(--color-bg);
-}
-.graph-zoom .btn { border: none; }
-.graph-zoom .btn + .btn { border-left: 1px solid var(--color-divider); }
-
-/* ── settings ──────────────────────────────────────────────────────── */
-.settings-nav {
-  width: 200px; flex: none;
-  border-right: 2px solid var(--color-divider);
-  padding: 18px 0; font-size: 14px;
-}
-.settings-nav-item {
-  padding: 8px 18px; cursor: pointer;
-  width: 100%; text-align: left; background: transparent; border: 0; font: inherit;
-}
-.settings-nav-item:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.settings-nav-item.is-on, .settings-nav-item.is-on:hover {
-  background: var(--color-accent); color: var(--color-bg);
-}
-.settings-body { flex: 1; padding: 28px 40px; min-width: 0; max-width: 820px; overflow-y: auto; }
-.account-row {
-  display: flex; align-items: center; gap: 16px;
-  padding: 16px 0; border-bottom: 1px solid var(--color-divider);
-}
-.account-badge {
-  width: 36px; height: 36px; flex: none;
-  border: 2px solid var(--color-text);
-  display: grid; place-items: center; font-weight: 800; font-size: 13px;
-}
-
-/* ── command palette ───────────────────────────────────────────────── */
-.palette-backdrop {
-  position: absolute; inset: 0;
-  background: color-mix(in srgb, var(--color-neutral-900) 42%, transparent);
-  display: flex; justify-content: center; padding-top: 120px;
-  z-index: 10;
-}
-.palette {
-  width: 620px; height: fit-content; max-height: calc(100% - 160px);
-  display: flex; flex-direction: column;
-  background: var(--color-bg); box-shadow: var(--shadow-lg);
-  border: 1px solid var(--color-divider);
-}
-.palette-search {
-  display: flex; align-items: center; gap: 12px;
-  padding: 16px 18px; border-bottom: 2px solid var(--color-divider);
-}
-.palette-input {
-  flex: 1; font: inherit; font-size: 16px;
-  background: transparent; border: 0; color: var(--color-text);
-  caret-color: var(--color-accent);
-}
-.palette-list { padding: 8px 0; overflow-y: auto; }
-.palette-section { padding: 5px 18px; }
-.palette-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 18px; font-size: 14px; cursor: pointer;
-  width: 100%; background: transparent; border: 0; font-family: inherit;
-  text-align: left; color: inherit;
-}
-.palette-item-on { background: var(--color-accent); color: var(--color-bg); }
-
-/* ── empty state ───────────────────────────────────────────────────── */
-.empty { flex: 1; padding: 80px 64px; }
-.empty-inner { max-width: 520px; }
-.empty-mark { width: 56px; height: 56px; margin-bottom: 24px; }
-.empty-keys {
-  display: grid; grid-template-columns: auto 1fr;
-  gap: 10px 14px; align-items: center; justify-items: start; font-size: 13px;
-}
+.cal-month { flex: 1; min-width: 0; overflow-y: auto; }
+.cal-month .dt-month { border-top: 0; }
+.cal-mline { cursor: pointer; }
+.cal-month-note { margin: 0; padding: var(--space-3) var(--space-5); font-size: 11px; line-height: 16px; color: var(--label-secondary); }
 
 /* drag proxy — a detached, column-sized stand-in for the browser's drag image */
 .cal-drag-proxy {
-  position: fixed; top: -1000px; left: -1000px;
-  width: 132px; box-sizing: border-box;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  position: fixed; top: -1000px; left: -1000px; width: 132px;
+  font-family: var(--font-sans);
 }
+
+/* narrow: Week falls back to Day in CalendarPage (NARROW_QUERY) — keep these in step */
+@media (max-width: 960px) {
+  .cal-sync { display: none; }
+  .dt-tray { width: 180px; }
+  /* list + detail in one narrow window: the sheet gives way first. The
+     calendar's detail floats over the grid instead. */
+  .task-sheet-docked { width: 280px; }
+  .task-scrim { padding: var(--space-4); }
+}
+
+/* ── focus ─────────────────────────────────────────────────────────── */
+.focus-main { flex: 1; min-width: 0; overflow-y: auto; display: flex; align-items: center; justify-content: center; }
+.dt-panel { flex: none; overflow-y: auto; }
+.focus-hint { margin-top: 10px; font-size: 11px; }
+.focus-interrupt { display: flex; gap: var(--space-2); align-items: center; padding: 0 4px; }
+.focus-settings { margin-top: auto; }
+
+/* ── graph ─────────────────────────────────────────────────────────── */
+.graph-canvas { flex: 1; min-width: 0; min-height: 0; }
+/* the zoomed layer holds the edges and nodes; the floats sit outside it so they
+   keep their size */
+.graph-layer { position: absolute; inset: 0; transform-origin: 0 0; }
+.graph-legend { left: var(--space-4); bottom: var(--space-4); }
+.graph-zoom { right: var(--space-4); bottom: var(--space-4); }
+.graph-mode { right: var(--space-4); top: var(--space-4); padding: 3px; }
+
+/* ── settings ──────────────────────────────────────────────────────── */
+.dt-settings-body { overflow-y: auto; }
+.dt-settings-body > * { max-width: 720px; }
+.settings-inline { display: flex; gap: var(--space-2); }
+
+/* ── command palette ───────────────────────────────────────────────── */
+.palette-scrim {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; justify-content: center; align-items: flex-start; padding: 96px var(--space-4) 0;
+}
+.dt-palette { display: flex; flex-direction: column; max-height: calc(100% - 144px); }
+.dt-palette-list { overflow-y: auto; }

@@ -15,7 +15,9 @@ import "./styles/app.css";
 function Shell() {
   const { page, setPage, paletteOpen, setPaletteOpen, selectTask, composeOpen, setComposeOpen } =
     useApp();
-  const [railExpanded, setRailExpanded] = useState(false);
+  // The sidebar is the full navigation; a narrow window starts on the rail so
+  // the page keeps its width.
+  const [railExpanded, setRailExpanded] = useState(() => window.innerWidth >= 1100);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -51,7 +53,7 @@ function Shell() {
   }, [paletteOpen, composeOpen, setPage, setPaletteOpen, setComposeOpen, selectTask]);
 
   return (
-    <div className="shell">
+    <div className="shell dt">
       <Rail
         page={page}
         onNavigate={setPage}

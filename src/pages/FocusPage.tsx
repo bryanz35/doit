@@ -1,18 +1,24 @@
-/** Screen 1c — pomodoro running on the selected task.
+/** Focus — a ring timer on the selected task, with today's sessions beside it.
  *  The timer ticks locally; persistence and OS-level "do not disturb" are
  *  backend work. */
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../data/store";
-import { CheckBox, Kbd, Rule, formatMinutes } from "../components/primitives";
+import { listColor } from "../data/scope";
+import { CheckBox, Kbd, dueLabel, formatMinutes } from "../components/primitives";
+import { FocusIcon } from "../components/icons";
 
 const WORK_MINUTES = 25;
 const PLANNED_SESSIONS = 4;
 const COMPLETED_TODAY = 2;
 const GOAL_MINUTES = 180;
 
+/** The ring's radius in its 240px box; the arc's dash is a share of this circumference. */
+const RING_RADIUS = 112;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
 export function FocusPage() {
-  const { tasks, selectedTaskId, selectTask, toggleTask, setPage } = useApp();
+  const { tasks, selectedTaskId, selectTask, toggleTask, setPage, today } = useApp();
   const task =
     tasks.find((t) => t.id === selectedTaskId && t.status !== "done") ??
     tasks.find((t) => t.status !== "done");
@@ -55,141 +61,157 @@ export function FocusPage() {
   if (!task) {
     return (
       <>
-        <header className="topbar">
-          <h4>Focus</h4>
+        <header className="dt-toolbar">
+          <span className="dt-toolbar-title">Focus</span>
         </header>
-        <div className="empty">
-          <div className="empty-inner">
-            <div className="empty-mark" />
-            <h2 style={{ margin: "0 0 10px" }}>Nothing to focus on.</h2>
-            <p className="text-muted">Pick a task from the list first.</p>
-            <button type="button" className="btn btn-primary" onClick={() => setPage("tasks")}>
-              Open tasks
-            </button>
+        <div className="dt-empty page-fill">
+          <div className="dt-empty-icon">
+            <FocusIcon size={30} />
           </div>
+          <h2>Nothing to focus on.</h2>
+          <p>Pick a task from the list first.</p>
+          <button type="button" className="dt-btn dt-btn-primary" onClick={() => setPage("tasks")}>
+            Open tasks
+          </button>
         </div>
       </>
     );
   }
 
+  const color = listColor(task.list);
+
   return (
     <>
-      <header className="topbar">
-        <h4>Focus</h4>
-        <span className="text-muted meta" style={{ fontSize: 13 }}>
+      <header className="dt-toolbar">
+        <span className="dt-toolbar-title">Focus</span>
+        <span className="dt-muted toolbar-meta">
           Session {COMPLETED_TODAY + 1} of {PLANNED_SESSIONS} · {WORK_MINUTES}/5
         </span>
         {/* TODO(backend): actually mute notifications through the OS. */}
-        <span className="tag tag-accent" style={{ marginLeft: "auto" }}>
-          Notifications muted
-        </span>
+        <div className="dt-toolbar-right">
+          <span className="dt-tag dt-tag-accent">Notifications muted</span>
+        </div>
       </header>
 
-      <div className="body">
+      <div className="page-body">
         <div className="focus-main">
-          <h6 style={{ margin: "0 0 10px", color: "var(--color-accent)" }}>Working on</h6>
-          <h2 style={{ margin: "0 0 8px", fontSize: 38 }}>{task.title}</h2>
-          <p className="text-muted" style={{ fontSize: 14, margin: "0 0 30px" }}>
-            {task.list ?? "Inbox"} · due {task.due ?? "someday"}
-            {task.pomodoros ? ` · ${task.pomodoros} pomodoros estimated` : ""}
-          </p>
+          <section className="dt-focus" data-color={color}>
+            <div className="dt-focus-kicker">
+              WORKING ON · SESSION {COMPLETED_TODAY + 1} OF {PLANNED_SESSIONS}
+            </div>
+            <h2 className="dt-focus-task">{task.title}</h2>
+            <p className="dt-focus-meta">
+              {task.list ?? "Inbox"} · due {dueLabel(task.due, today).toLowerCase()}
+              {task.pomodoros ? ` · ${task.pomodoros} pomodoros estimated` : ""}
+            </p>
 
-          <div className="focus-clock">{clock}</div>
+            <div
+              className={running ? "dt-ring" : "dt-ring dt-ring-paused"}
+              role="timer"
+              aria-label={`${Math.floor(remaining / 60)} minutes ${remaining % 60} seconds left`}
+            >
+              <svg width="240" height="240" viewBox="0 0 240 240" aria-hidden="true">
+                <circle className="dt-ring-track" cx="120" cy="120" r={RING_RADIUS} />
+                <circle
+                  className="dt-ring-fill"
+                  cx="120"
+                  cy="120"
+                  r={RING_RADIUS}
+                  strokeDasharray={`${(RING_CIRCUMFERENCE * progress) / 100} ${RING_CIRCUMFERENCE}`}
+                />
+              </svg>
+              <div className="dt-ring-center">
+                <div className="dt-timer">{clock}</div>
+                <div className="dt-timer-sub">
+                  of {WORK_MINUTES}:00{running ? "" : " · paused"}
+                </div>
+              </div>
+            </div>
 
-          <div className="focus-bar">
-            <div className="focus-bar-fill" style={{ width: `${progress}%` }} />
-          </div>
-          <div style={{ display: "flex", fontSize: 12, color: "var(--color-neutral-700)" }}>
-            <span>Started 13:58</span>
-            <span style={{ marginLeft: "auto" }}>Break at 14:23</span>
-          </div>
+            <div className="dt-focus-times">
+              <span>Started 13:58</span>
+              <span>Break at 14:23</span>
+            </div>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 34 }}>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ padding: "12px 22px" }}
-              onClick={() => setRunning((value) => !value)}
-            >
-              {running ? "Pause" : "Resume"}
-              <Kbd onAccent>Space</Kbd>
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ padding: "12px 22px" }}
-              onClick={() => setRemaining(5 * 60)}
-            >
-              Skip to break
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ padding: "12px 10px" }}
-              onClick={() => {
-                toggleTask(task.id);
-                setRunning(false);
-              }}
-            >
-              Mark task done
-            </button>
-          </div>
+            <div className="dt-focus-actions">
+              <button type="button" className="dt-btn dt-btn-lg" onClick={() => setRemaining(5 * 60)}>
+                Skip to break
+              </button>
+              <button
+                type="button"
+                className="dt-btn dt-btn-primary dt-btn-round"
+                onClick={() => setRunning((value) => !value)}
+              >
+                {running ? "Pause" : "Resume"}
+              </button>
+              <button
+                type="button"
+                className="dt-btn dt-btn-plain dt-btn-lg"
+                onClick={() => {
+                  toggleTask(task.id);
+                  setRunning(false);
+                }}
+              >
+                Mark done
+              </button>
+            </div>
+            <div className="dt-muted focus-hint">
+              <Kbd>Space</Kbd> pause / resume
+            </div>
+          </section>
         </div>
 
-        <aside className="side">
+        <aside className="dt-panel" data-color={color}>
           <div>
-            <h6 style={{ margin: "0 0 10px", color: "var(--color-neutral-700)" }}>
-              Today's sessions
-            </h6>
-            <div style={{ display: "flex", gap: 6 }}>
+            <div className="dt-panel-head">TODAY'S SESSIONS</div>
+            <div className="dt-pips">
               {Array.from({ length: 6 }, (_, index) => (
-                <div
+                <span
                   key={index}
                   className={[
-                    "pip",
-                    index < COMPLETED_TODAY ? "pip-done" : "",
-                    index === COMPLETED_TODAY ? "pip-active" : "",
+                    "dt-pip",
+                    index < COMPLETED_TODAY ? "dt-pip-done" : "",
+                    index === COMPLETED_TODAY ? "dt-pip-active" : "",
                   ]
                     .filter(Boolean)
                     .join(" ")}
                 />
               ))}
             </div>
-            <p className="text-muted" style={{ fontSize: 12, margin: "10px 0 0" }}>
+            <p className="dt-panel-note">
               {formatMinutes(COMPLETED_TODAY * WORK_MINUTES + Math.floor(elapsed / 60))} focused ·
               goal {formatMinutes(GOAL_MINUTES)}
             </p>
           </div>
 
-          <Rule />
-
-          <div>
-            <h6 style={{ margin: "0 0 10px", color: "var(--color-neutral-700)" }}>Up next</h6>
-            {upNext.map((next) => (
-              <div
-                className="row"
-                style={{ padding: "9px 0" }}
-                key={next.id}
-                onClick={() => selectTask(next.id)}
-              >
-                <CheckBox label={next.title} onToggle={() => toggleTask(next.id)} />
-                <span style={{ fontSize: 14 }}>{next.title}</span>
-                <span className="text-muted row-trailing">
-                  {formatMinutes(next.estimateMinutes)}
-                </span>
+          {upNext.length > 0 && (
+            <div>
+              <div className="dt-panel-head">UP NEXT</div>
+              <div className="dt-group">
+                {upNext.map((next) => (
+                  <div
+                    className="dt-row"
+                    data-color={listColor(next.list)}
+                    key={next.id}
+                    onClick={() => selectTask(next.id)}
+                  >
+                    <CheckBox label={next.title} onToggle={() => toggleTask(next.id)} />
+                    <div className="dt-row-body">
+                      <span className="dt-row-title">{next.title}</span>
+                    </div>
+                    {next.estimateMinutes !== undefined && (
+                      <span className="dt-row-trailing">{formatMinutes(next.estimateMinutes)}</span>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-
-          <Rule />
+            </div>
+          )}
 
           <div>
-            <h6 style={{ margin: "0 0 8px", color: "var(--color-neutral-700)" }}>Interruptions</h6>
-            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 8px" }}>
-              Logged without leaving the timer.
-            </p>
+            <div className="dt-panel-head">INTERRUPTIONS</div>
             <form
-              style={{ display: "flex", gap: 8, alignItems: "center" }}
+              className="focus-interrupt"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (!interruption.trim()) return;
@@ -198,25 +220,26 @@ export function FocusPage() {
               }}
             >
               <input
-                className="input"
+                className="dt-input"
                 placeholder="Note a distraction…"
+                aria-label="Note a distraction"
                 value={interruption}
                 onChange={(event) => setInterruption(event.currentTarget.value)}
               />
               <Kbd>I</Kbd>
             </form>
-            {interruptions.map((note, index) => (
-              <p key={index} className="text-muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-                · {note}
-              </p>
-            ))}
+            {interruptions.length > 0 && (
+              <ul className="dt-log">
+                {interruptions.map((note, index) => (
+                  <li key={index}>{note}</li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          <div style={{ marginTop: "auto" }}>
-            <button type="button" className="btn btn-secondary btn-block">
-              Session settings
-            </button>
-          </div>
+          <button type="button" className="dt-btn focus-settings">
+            Session settings
+          </button>
         </aside>
       </div>
     </>

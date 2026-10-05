@@ -1,5 +1,5 @@
-/** Screen 1d — free canvas, each node a task, links are dependencies.
- *  Nodes drag locally; layout is not persisted yet. */
+/** The graph — a dotted canvas of task cards, links are dependencies. Nodes
+ *  drag locally; layout is not persisted yet. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { graphEdges, graphNodes as seedNodes } from "../data/mock";
@@ -69,128 +69,119 @@ export function GraphPage() {
 
   const nodeById = (id: string) => nodes.find((node) => node.id === id);
 
+  // Links touching the selected node are drawn hot.
+  const isHot = (edge: { from: string; to: string }) =>
+    selected !== null && (edge.from === selected || edge.to === selected);
+
   return (
     <>
-      <header className="topbar">
-        <h4>Graph</h4>
-        <span className="text-muted meta" style={{ fontSize: 13 }}>
+      <header className="dt-toolbar">
+        <span className="dt-toolbar-title">Graph</span>
+        <span className="dt-muted toolbar-meta">
           Release 2.4 · {nodes.length} nodes, {graphEdges.length} links
         </span>
-        <div className="topbar-right">
-          <span className="tag tag-neutral">Snap to grid</span>
-          <Segmented options={MODES} value={mode} onChange={setMode} />
+        <div className="dt-toolbar-right">
+          <span className="dt-tag">Snap to grid</span>
         </div>
       </header>
 
-      <div className="body">
-        <div className="graph" ref={canvas} onClick={() => setSelected(null)}>
+      <div className="page-body">
+        <div className="dt-graph graph-canvas" ref={canvas} onClick={() => setSelected(null)}>
           <div className="graph-layer" style={{ transform: `scale(${zoom / 100})` }}>
-          <svg className="graph-edges" fill="none" stroke="var(--color-text)" strokeWidth={2}>
-            {graphEdges.map((edge) => {
-              const from = nodeById(edge.from);
-              const to = nodeById(edge.to);
-              if (!from || !to) return null;
-              const x1 = from.x + from.width;
-              const y1 = from.y + NODE_HEIGHT / 2;
-              const x2 = to.x;
-              const y2 = to.y + NODE_HEIGHT / 2;
-              const mid = (x1 + x2) / 2;
+            <svg className="dt-graph-edges" aria-hidden="true">
+              {graphEdges.map((edge) => {
+                const from = nodeById(edge.from);
+                const to = nodeById(edge.to);
+                if (!from || !to) return null;
+                const x1 = from.x + from.width;
+                const y1 = from.y + NODE_HEIGHT / 2;
+                const x2 = to.x;
+                const y2 = to.y + NODE_HEIGHT / 2;
+                const mid = (x1 + x2) / 2;
+                const classes = ["dt-edge"];
+                if (edge.dashed) classes.push("dt-edge-soft");
+                if (isHot(edge)) classes.push("dt-edge-hot");
+                return (
+                  <path
+                    key={edge.id}
+                    className={classes.join(" ")}
+                    d={`M${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`}
+                  />
+                );
+              })}
+            </svg>
+
+            {nodes.map((node) => {
+              const isSelected = node.id === selected;
+              const classes = ["dt-node"];
+              if (node.variant === "idea") classes.push("dt-node-idea");
+              if (node.variant === "done") classes.push("dt-node-done");
+              if (node.kicker === "BLOCKED") classes.push("dt-node-blocked");
               return (
-                <path
-                  key={edge.id}
-                  d={`M${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`}
-                  opacity={0.55}
-                  strokeDasharray={edge.dashed ? "6 5" : undefined}
-                  stroke={edge.accent ? "var(--color-accent)" : undefined}
-                />
+                <div
+                  key={node.id}
+                  className={classes.join(" ")}
+                  data-color={node.variant === "done" ? "gray" : "blue"}
+                  aria-selected={isSelected}
+                  style={{ left: node.x, top: node.y, width: node.width }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelected(node.id);
+                  }}
+                  onPointerDown={(event) => {
+                    const point = toLayer(event.clientX, event.clientY);
+                    if (!point) return;
+                    drag.current = {
+                      id: node.id,
+                      dx: point.x - node.x,
+                      dy: point.y - node.y,
+                    };
+                  }}
+                >
+                  <div className="dt-node-status">
+                    {isSelected ? `SELECTED · ${countLinks(node.id)} LINKS` : node.kicker}
+                  </div>
+                  <div className="dt-node-title">{node.label}</div>
+                  {node.sub && <div className="dt-node-sub">{node.sub}</div>}
+                  {isSelected && (
+                    <>
+                      <span className="dt-port" style={{ left: -5 }} />
+                      <span className="dt-port" style={{ right: -5 }} />
+                    </>
+                  )}
+                </div>
               );
             })}
-          </svg>
-
-          {nodes.map((node) => {
-            const isSelected = node.id === selected;
-            const classes = ["node"];
-            if (isSelected) classes.push("node-selected");
-            if (node.variant === "idea") classes.push("node-idea");
-            if (node.variant === "done") classes.push("node-done");
-            return (
-              <div
-                key={node.id}
-                className={classes.join(" ")}
-                style={{ left: node.x, top: node.y, width: node.width }}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSelected(node.id);
-                }}
-                onPointerDown={(event) => {
-                  const point = toLayer(event.clientX, event.clientY);
-                  if (!point) return;
-                  drag.current = {
-                    id: node.id,
-                    dx: point.x - node.x,
-                    dy: point.y - node.y,
-                  };
-                }}
-              >
-                <div className={isSelected ? "node-kicker" : "node-kicker text-muted"}>
-                  {isSelected ? `SELECTED · ${countLinks(node.id)} LINKS` : node.kicker}
-                </div>
-                <div className="node-title">{node.label}</div>
-                {node.sub && (
-                  <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>
-                    {node.sub}
-                  </div>
-                )}
-                {isSelected && (
-                  <>
-                    <span className="node-port" style={{ right: -5 }} />
-                    <span className="node-port" style={{ left: -5 }} />
-                  </>
-                )}
-              </div>
-            );
-          })}
           </div>
 
-          <div className="graph-legend">
-            <Kbd>N</Kbd>
-            <span className="text-muted">new node</span>
-            <Kbd>L</Kbd>
-            <span className="text-muted">link</span>
-            <Kbd>Del</Kbd>
-            <span className="text-muted">remove</span>
-            <Kbd>Space</Kbd>
-            <span className="text-muted">pan</span>
-            <Kbd>Enter</Kbd>
-            <span className="text-muted">open task</span>
+          {/* The floats sit outside the zoomed layer so they keep their size. */}
+          <div className="dt-float graph-legend">
+            <Kbd>N</Kbd>new node <Kbd>L</Kbd>link <Kbd>Del</Kbd>remove <Kbd>Space</Kbd>pan{" "}
+            <Kbd>↵</Kbd>open task
           </div>
 
-          <div className="graph-zoom">
+          <div className="dt-float dt-zoom graph-zoom" onClick={(event) => event.stopPropagation()}>
             <button
               type="button"
-              className="btn btn-secondary btn-icon"
-              onClick={(event) => {
-                event.stopPropagation();
-                setZoom((z) => Math.max(40, z - 10));
-              }}
+              className="dt-btn dt-btn-icon"
+              onClick={() => setZoom((z) => Math.max(40, z - 10))}
               aria-label="Zoom out"
             >
               −
             </button>
-            <button type="button" className="btn btn-secondary" onClick={(e) => e.stopPropagation()}>
-              {zoom}%
-            </button>
+            <span className="dt-zoom-value">{zoom}%</span>
             <button
               type="button"
-              className="btn btn-secondary btn-icon"
-              onClick={(event) => {
-                event.stopPropagation();
-                setZoom((z) => Math.min(160, z + 10));
-              }}
+              className="dt-btn dt-btn-icon"
+              onClick={() => setZoom((z) => Math.min(160, z + 10))}
               aria-label="Zoom in"
             >
               +
             </button>
+          </div>
+
+          <div className="dt-float graph-mode" onClick={(event) => event.stopPropagation()}>
+            <Segmented options={MODES} value={mode} onChange={setMode} />
           </div>
         </div>
       </div>

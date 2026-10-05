@@ -1,12 +1,17 @@
-/** Screen 1a — Today, with the detail pane. Variation 2a adds the dense table.
- *  Screen 1f's inbox-zero state renders when the filter yields nothing. */
+/** The task list — Reminders-style: a big list title in the list's colour, then
+ *  Overdue / Today / Later / Completed sections of round-checkbox rows, with the
+ *  detail docked on the right. The Table layout is the same tasks as a native
+ *  striped table; the inbox-zero state renders when the scope and filter yield
+ *  nothing. */
 
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../data/store";
 import type { Task } from "../types";
-import { CheckBox, Kbd, Rule, Segmented, formatMinutes } from "../components/primitives";
+import { inScope, listColor, scopeColor, scopeTitle } from "../data/scope";
+import { CheckBox, Kbd, MOD_KEY, Segmented, dueLabel, formatMinutes } from "../components/primitives";
 import { AddTaskButton, AddTaskRow } from "../components/AddTaskRow";
 import { TaskDetail } from "../components/TaskDetail";
+import { CheckIcon, InfoIcon, PlusIcon } from "../components/icons";
 
 const FILTERS = ["Open", "Done", "All"] as const;
 const LAYOUTS = ["List", "Table"] as const;
@@ -26,13 +31,11 @@ function completedLabel(completedAt: string | undefined, today: string): string 
     : at.toLocaleDateString(undefined, { weekday: "short" });
 }
 
-/** "Yesterday" / "Today" / "Fri 22" — how the mockups label a due date. */
-function dueLabel(task: Task, today: string): string {
-  if (!task.due) return "Someday";
-  if (task.due === today) return "Today";
-  if (task.due < today) return "Yesterday";
-  const date = new Date(`${task.due}T00:00:00`);
-  return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+/** What sits at the right end of a row: when it was finished, or the estimate. */
+function trailing(task: Task, today: string): string {
+  if (task.status === "done") return completedLabel(task.completedAt, today);
+  if (task.pomodoros) return `${task.pomodoros} × 25m`;
+  return task.estimateMinutes !== undefined ? formatMinutes(task.estimateMinutes) : "";
 }
 
 export function TasksPage() {
@@ -47,6 +50,8 @@ export function TasksPage() {
     paletteOpen,
     composeOpen,
     setComposeOpen,
+    scope,
+    setScope,
   } = useApp();
   const [filter, setFilter] = useState<Filter>("Open");
   const [layout, setLayout] = useState<Layout>("List");
@@ -68,17 +73,25 @@ export function TasksPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [paletteOpen, setComposeOpen]);
 
-  // A newly added task may not match the current filter, which would make the
-  // add look like it failed. Done-only is the only filter that can hide one.
+  // A newly added task may not match what is on screen, which would make the
+  // add look like it failed. It is open and due today unless the line says
+  // otherwise, so the Done filter and the Overdue / Completed lists would hide it.
   useEffect(() => {
-    if (composeOpen && filter === "Done") setFilter("Open");
-  }, [composeOpen, filter]);
+    if (!composeOpen) return;
+    if (filter === "Done") setFilter("Open");
+    if (scope.kind === "smart" && (scope.id === "overdue" || scope.id === "completed")) {
+      setScope({ kind: "smart", id: "today" });
+    }
+  }, [composeOpen, filter, scope, setScope]);
+
+  // Completed is done tasks by definition, so the status filter stands aside.
+  const showsDone = scope.kind === "smart" && scope.id === "completed";
 
   const groups = useMemo(() => {
     const visible = tasks.filter((task) => {
-      if (filter === "Open") return task.status !== "done";
-      if (filter === "Done") return task.status === "done";
-      return true;
+      if (!inScope(task, scope, today)) return false;
+      if (showsDone || filter === "All") return true;
+      return filter === "Open" ? task.status !== "done" : task.status === "done";
     });
     return {
       overdue: visible.filter((t) => t.status !== "done" && t.due && t.due < today),
@@ -86,213 +99,191 @@ export function TasksPage() {
       later: visible.filter((t) => t.status !== "done" && (!t.due || t.due > today)),
       done: visible.filter((t) => t.status === "done"),
     };
-  }, [tasks, filter, today]);
+  }, [tasks, scope, filter, showsDone, today]);
 
-  const openCount = tasks.filter((t) => t.status !== "done").length;
-  const doneCount = tasks.length - openCount;
-  const totalEstimate = tasks
+  const ordered = [...groups.overdue, ...groups.today, ...groups.later, ...groups.done];
+  const openCount = ordered.length - groups.done.length;
+  const totalEstimate = ordered
     .filter((t) => t.status !== "done")
     .reduce((sum, t) => sum + (t.estimateMinutes ?? 0), 0);
 
   const selected = tasks.find((task) => task.id === selectedTaskId);
-  const isEmpty =
-    groups.overdue.length + groups.today.length + groups.later.length + groups.done.length === 0;
+  const isEmpty = ordered.length === 0;
+  const title = scopeTitle(scope);
 
-  const renderRow = (task: Task) => (
-    <div
-      key={task.id}
-      className={[
-        "row",
-        task.id === selectedTaskId ? "row-selected" : "",
-        task.status === "done" ? "row-done" : "",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      onClick={() => selectTask(task.id)}
-      /* Selecting with the mouse must not park DOM focus on the row: the next
-         keybind would paint a :focus-visible ring an instant before the page
-         unmounts it. Keyboard focus (Tab) still works and still rings. */
-      onMouseDown={(event) => event.preventDefault()}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") selectTask(task.id);
-      }}
-    >
-      <CheckBox
-        label={task.title}
-        done={task.status === "done"}
-        overdue={Boolean(task.due && task.due < today && task.status !== "done")}
-        onToggle={() => toggleTask(task.id)}
-      />
-      <span className={task.status === "done" ? "row-title text-muted" : "row-title"}>
-        {task.title}
-      </span>
-      {task.due && task.due < today && task.status !== "done" ? (
-        <span className="tag tag-accent" style={{ marginLeft: "auto" }}>
-          Yesterday
+  const renderRow = (task: Task) => {
+    const overdue = task.status !== "done" && task.due !== undefined && task.due < today;
+    const meta = [
+      task.due && task.status !== "done" ? (
+        <span key="due" className={overdue ? "dt-overdue" : undefined}>
+          {dueLabel(task.due, today)}
         </span>
-      ) : (
-        <span className="text-muted row-trailing">
-          {task.status === "done"
-            ? completedLabel(task.completedAt, today)
-            : task.pomodoros
-              ? `${task.pomodoros} × 25m`
-              : formatMinutes(task.estimateMinutes)}
+      ) : null,
+      scope.kind !== "list" && task.list ? <span key="list">{task.list}</span> : null,
+      ...task.tags.map((tag) => (
+        <span key={`#${tag}`} className="dt-hashtag">
+          #{tag}
         </span>
-      )}
-    </div>
-  );
+      )),
+    ].filter(Boolean);
+    return (
+      <div
+        key={task.id}
+        className={task.status === "done" ? "dt-row dt-row-done" : "dt-row"}
+        data-color={listColor(task.list)}
+        aria-selected={task.id === selectedTaskId}
+        onClick={() => selectTask(task.id)}
+        /* Selecting with the mouse must not park DOM focus on the row: the next
+           keybind would paint a :focus-visible ring an instant before the page
+           unmounts it. Keyboard focus (Tab) still works and still rings. */
+        onMouseDown={(event) => event.preventDefault()}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") selectTask(task.id);
+        }}
+      >
+        <CheckBox label={task.title} done={task.status === "done"} onToggle={() => toggleTask(task.id)} />
+        <div className="dt-row-body">
+          <span className="dt-row-title">{task.title}</span>
+          {meta.length > 0 && <span className="dt-row-meta">{meta}</span>}
+        </div>
+        <span className="dt-row-trailing">{trailing(task, today)}</span>
+        <button
+          type="button"
+          className="dt-row-info"
+          aria-label={`Show detail for ${task.title}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            selectTask(task.id);
+          }}
+        >
+          <InfoIcon size={18} stroke={1.6} />
+        </button>
+      </div>
+    );
+  };
+
+  const section = (label: string, list: Task[], overdue = false) =>
+    list.length > 0 && (
+      <>
+        <div className={overdue ? "dt-section dt-section-overdue" : "dt-section"}>
+          {label} <span className="dt-count">{list.length}</span>
+        </div>
+        <div>{list.map(renderRow)}</div>
+      </>
+    );
 
   return (
     <>
-      <header className="topbar">
-        <h4>Today</h4>
-        <span className="text-muted meta" style={{ fontSize: 13 }}>
+      <header className="dt-toolbar">
+        <span className="dt-toolbar-title">Tasks</span>
+        <span className="dt-muted toolbar-meta">
           {new Date(`${today}T00:00:00`).toLocaleDateString(undefined, {
             weekday: "long",
             day: "numeric",
             month: "long",
           })}
         </span>
-        <div className="topbar-right">
+        <div className="dt-toolbar-right">
           <Segmented options={LAYOUTS} value={layout} onChange={setLayout} />
-          <Segmented options={FILTERS} value={filter} onChange={setFilter} />
+          {!showsDone && <Segmented options={FILTERS} value={filter} onChange={setFilter} />}
           <button
             type="button"
-            className="btn btn-primary"
+            className="dt-btn dt-btn-icon toolbar-add"
+            aria-label="New task"
+            title="New task (N)"
             onClick={() => setComposeOpen(true)}
           >
-            New task
-            <Kbd onAccent>N</Kbd>
+            <PlusIcon />
           </button>
         </div>
       </header>
 
-      {/* `.body` is a row (list + detail pane), so the failure banner sits
-          above it rather than inside. */}
+      {/* `.page-body` is a row (list + docked detail), so the failure banner
+          sits above it rather than inside. */}
       {error && (
-        <div className="banner" role="alert">
+        <div className="dt-banner" role="alert">
+          <InfoIcon size={14} />
           {error}
         </div>
       )}
 
-      <div className="body">
+      <div className="page-body">
         {!loaded ? (
-          <div className="empty">
-            <div className="empty-inner text-muted">Loading tasks…</div>
+          <div className="dt-empty page-fill">
+            <p>Loading tasks…</p>
           </div>
         ) : isEmpty ? (
-          <EmptyState />
-        ) : (
-          <div className="tasklist">
-            {layout === "Table" ? (
-              <>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 14 }}>
-                  <h4 style={{ margin: 0 }}>All tasks</h4>
-                  <span className="text-muted" style={{ fontSize: 12 }}>
-                    {openCount} open · {doneCount} done
-                  </span>
-                  <span
-                    className="tag tag-outline meta"
-                    style={{ marginLeft: "auto", alignSelf: "center" }}
-                  >
-                    est. {formatMinutes(totalEstimate)}
-                  </span>
-                </div>
-                {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 26 }} />
-                      <th>Task</th>
-                      <th style={{ width: 110 }}>Due</th>
-                      <th style={{ width: 96 }}>Est.</th>
-                      <th style={{ width: 110 }}>Repo</th>
+          <EmptyState title={emptyTitle(scope.kind === "list" ? scope.name : scope.id)} />
+        ) : layout === "Table" ? (
+          <div className="tasks-scroll tasks-table">
+            <div className="dt-table-head">
+              <h2>{title}</h2>
+              <span className="dt-muted">
+                {openCount} open · {groups.done.length} done
+              </span>
+              {totalEstimate > 0 && (
+                <span className="dt-tag dt-tag-accent table-total">
+                  est. {formatMinutes(totalEstimate)}
+                </span>
+              )}
+            </div>
+            {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
+            <table className="dt-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 36 }} />
+                  <th>Task</th>
+                  <th style={{ width: 110 }}>Due</th>
+                  <th style={{ width: 96 }}>Est.</th>
+                  <th style={{ width: 110 }}>Repo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ordered.map((task) => {
+                  const done = task.status === "done";
+                  const overdue = !done && task.due !== undefined && task.due < today;
+                  return (
+                    <tr
+                      key={task.id}
+                      data-color={listColor(task.list)}
+                      aria-selected={task.id === selectedTaskId}
+                      onClick={() => selectTask(task.id)}
+                      className="tasks-table-row"
+                    >
+                      <td>
+                        <CheckBox label={task.title} done={done} onToggle={() => toggleTask(task.id)} />
+                      </td>
+                      <td className={done ? "dt-done" : undefined}>{task.title}</td>
+                      <td className="dt-num">
+                        {done ? (
+                          "Done"
+                        ) : (
+                          <span className={overdue ? "dt-overdue" : undefined}>
+                            {dueLabel(task.due, today)}
+                          </span>
+                        )}
+                      </td>
+                      <td className="dt-num">{formatMinutes(task.estimateMinutes)}</td>
+                      <td className="dt-num">{task.repo ?? "—"}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {[...groups.overdue, ...groups.today, ...groups.later, ...groups.done].map(
-                      (task) => (
-                        <tr
-                          key={task.id}
-                          onClick={() => selectTask(task.id)}
-                          style={{ cursor: "pointer" }}
-                        >
-                          <td>
-                            <CheckBox
-                              label={task.title}
-                              done={task.status === "done"}
-                              overdue={Boolean(
-                                task.due && task.due < today && task.status !== "done",
-                              )}
-                              onToggle={() => toggleTask(task.id)}
-                            />
-                          </td>
-                          <td
-                            className={task.status === "done" ? "text-muted" : undefined}
-                            style={
-                              task.status === "done" ? { textDecoration: "line-through" } : undefined
-                            }
-                          >
-                            {task.title}
-                          </td>
-                          <td className={task.due && task.due < today ? undefined : "text-muted"}>
-                            {task.status === "done" ? (
-                              "Done"
-                            ) : task.due && task.due < today ? (
-                              <span className="tag tag-accent">Yesterday</span>
-                            ) : (
-                              dueLabel(task, today)
-                            )}
-                          </td>
-                          <td className="text-muted">{formatMinutes(task.estimateMinutes)}</td>
-                          <td className="text-muted">{task.repo ?? "—"}</td>
-                        </tr>
-                      ),
-                    )}
-                  </tbody>
-                </table>
-              </>
-            ) : (
-              <>
-                {groups.overdue.length > 0 && (
-                  <>
-                    <h6 className="group-head group-head-overdue">
-                      Overdue · {groups.overdue.length}
-                    </h6>
-                    <Rule />
-                    {groups.overdue.map(renderRow)}
-                  </>
-                )}
-
-                {groups.today.length > 0 && (
-                  <>
-                    <h6 className="group-head">Today · {groups.today.length}</h6>
-                    <Rule />
-                    {groups.today.map(renderRow)}
-                  </>
-                )}
-
-                {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
-
-                {groups.later.length > 0 && (
-                  <>
-                    <h6 className="group-head">Later · {groups.later.length}</h6>
-                    <Rule />
-                    {groups.later.map(renderRow)}
-                  </>
-                )}
-
-                {groups.done.length > 0 && (
-                  <>
-                    <h6 className="group-head">Completed · {groups.done.length}</h6>
-                    <Rule />
-                    {groups.done.map(renderRow)}
-                  </>
-                )}
-              </>
-            )}
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="tasks-scroll">
+            <div className="dt-listhead" data-color={scopeColor(scope)}>
+              <h1 className="dt-listhead-title">{title}</h1>
+              <span className="dt-listhead-count">{openCount || groups.done.length}</span>
+            </div>
+            {section("Overdue", groups.overdue, true)}
+            {section("Today", groups.today)}
+            {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
+            {section("Later", groups.later)}
+            {section("Completed", groups.done)}
           </div>
         )}
 
@@ -302,62 +293,50 @@ export function TasksPage() {
   );
 }
 
-/** Screen 1f — inbox zero. "Add something now" is a live compose row here, not
- *  a pointer at a row that only exists when there is a list to hang it under. */
-function EmptyState() {
+function emptyTitle(scope: string): string {
+  switch (scope) {
+    case "today":
+      return "Nothing due today.";
+    case "overdue":
+      return "Nothing overdue.";
+    case "completed":
+      return "Nothing completed yet.";
+    case "all":
+      return "Nothing to do.";
+    default:
+      return `Nothing in ${scope}.`;
+  }
+}
+
+/** Inbox zero. "Add something now" is a live compose row here, not a pointer at
+ *  a row that only exists when there is a list to hang it under. */
+function EmptyState({ title }: { title: string }) {
   const { setPaletteOpen, setPage, composeOpen, setComposeOpen } = useApp();
   return (
-    <div className="empty">
-      <div className="empty-inner">
-        <div className="empty-mark" />
-        <h2 style={{ margin: "0 0 10px" }}>Nothing due today.</h2>
-        <p className="text-muted" style={{ fontSize: 15, margin: "0 0 26px", textWrap: "pretty" }}>
-          Add something now, or pull one forward from the calendar.
-        </p>
-        <div className="empty-add">{composeOpen ? <AddTaskRow /> : <AddTaskButton />}</div>
-        <Rule />
-        <div className="empty-keys" style={{ marginTop: 22 }}>
-          <button
-            type="button"
-            className="kbd"
-            style={{ cursor: "pointer", background: "transparent" }}
-            onClick={() => setComposeOpen(true)}
-          >
-            N
-          </button>
-          <span className="text-muted">New task</span>
-          <button
-            type="button"
-            className="kbd"
-            style={{ cursor: "pointer", background: "transparent" }}
-            onClick={() => setPaletteOpen(true)}
-          >
-            Ctrl-K
-          </button>
-          <span className="text-muted">Command palette</span>
-          <Kbd>3</Kbd>
-          <span className="text-muted">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ padding: 0 }}
-              onClick={() => setPage("focus")}
-            >
-              Start a pomodoro on anything
-            </button>
-          </span>
-          <Kbd>4</Kbd>
-          <span className="text-muted">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ padding: 0 }}
-              onClick={() => setPage("graph")}
-            >
-              Open the graph
-            </button>
-          </span>
-        </div>
+    <div className="dt-empty page-fill">
+      <div className="dt-empty-icon">
+        <CheckIcon size={30} />
+      </div>
+      <h2>{title}</h2>
+      <p>Add something now, or pull one forward from the calendar.</p>
+      {composeOpen ? <AddTaskRow /> : <AddTaskButton />}
+      <div className="dt-keys">
+        <Kbd>N</Kbd>
+        <button type="button" className="dt-btn dt-btn-plain empty-link" onClick={() => setComposeOpen(true)}>
+          New task
+        </button>
+        <Kbd>{MOD_KEY}K</Kbd>
+        <button type="button" className="dt-btn dt-btn-plain empty-link" onClick={() => setPaletteOpen(true)}>
+          Command palette
+        </button>
+        <Kbd>3</Kbd>
+        <button type="button" className="dt-btn dt-btn-plain empty-link" onClick={() => setPage("focus")}>
+          Start a pomodoro on anything
+        </button>
+        <Kbd>4</Kbd>
+        <button type="button" className="dt-btn dt-btn-plain empty-link" onClick={() => setPage("graph")}>
+          Open the graph
+        </button>
       </div>
     </div>
   );

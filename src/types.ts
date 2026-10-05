@@ -7,6 +7,12 @@
 
 export type PageId = "tasks" | "calendar" | "focus" | "graph" | "settings";
 
+/** What the tasks screen is showing: one of the sidebar's smart lists, or one
+ *  list by name ("Inbox" is the tasks with no list). View state, not data. */
+export type TaskScope =
+  | { kind: "smart"; id: "today" | "overdue" | "all" | "completed" }
+  | { kind: "list"; name: string };
+
 export type TaskStatus = "todo" | "in-progress" | "done" | "idea" | "blocked";
 
 export interface Task {

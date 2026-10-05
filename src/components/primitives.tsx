@@ -2,14 +2,15 @@
 
 import type { ReactNode } from "react";
 
-export function Kbd({ children, onAccent }: { children: ReactNode; onAccent?: boolean }) {
-  return <span className={onAccent ? "kbd kbd-on-accent" : "kbd"}>{children}</span>;
+/** A keyboard hint pill. Inside a primary button it inverts on its own. */
+export function Kbd({ children }: { children: ReactNode }) {
+  return <span className="dt-key">{children}</span>;
 }
 
-export function Rule() {
-  return <div className="rule" />;
-}
+/** The modifier the palette shortcut uses on this platform. */
+export const MOD_KEY = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl ";
 
+/** macOS-style segmented control: a track with a raised thumb on the value. */
 export function Segmented<T extends string>({
   options,
   value,
@@ -20,45 +21,38 @@ export function Segmented<T extends string>({
   onChange: (next: T) => void;
 }) {
   return (
-    <div className="seg" role="tablist">
+    <div className="dt-seg" role="tablist">
       {options.map((option) => (
-        <span
+        <button
           key={option}
+          type="button"
           role="tab"
-          tabIndex={0}
           aria-selected={option === value}
-          className={option === value ? "seg-opt is-on" : "seg-opt"}
+          className="dt-seg-opt"
           onClick={() => onChange(option)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") onChange(option);
-          }}
         >
           {option}
-        </span>
+        </button>
       ))}
     </div>
   );
 }
 
-/** Task checkbox — a hollow square in the design, never a native control. */
+/** Task checkbox — a ring that fills with the list colour (`data-color` on an
+ *  ancestor) when done. Never a native control. */
 export function CheckBox({
   done,
-  overdue,
   onToggle,
   label,
 }: {
   done?: boolean;
-  overdue?: boolean;
   onToggle?: () => void;
   label: string;
 }) {
-  const classes = ["box"];
-  if (done) classes.push("box-done");
-  else if (overdue) classes.push("box-overdue");
   return (
     <button
       type="button"
-      className={classes.join(" ")}
+      className="dt-check"
       aria-pressed={Boolean(done)}
       aria-label={done ? `Mark "${label}" not done` : `Mark "${label}" done`}
       onClick={(event) => {
@@ -69,7 +63,7 @@ export function CheckBox({
   );
 }
 
-/** "1h 15m" / "50m" — the estimate format used throughout the mockups. */
+/** "1h 15m" / "50m" — the estimate format used throughout. */
 export function formatMinutes(minutes: number | undefined): string {
   if (minutes === undefined) return "—";
   const hours = Math.floor(minutes / 60);
@@ -84,4 +78,19 @@ export function formatClock(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Relative dates first: "Today", "Yesterday", "Tomorrow", "Fri 9" within a
+ *  week either side, "9 Oct" beyond that, "Someday" for no date. */
+export function dueLabel(due: string | undefined, today: string): string {
+  if (!due) return "Someday";
+  const date = new Date(`${due}T00:00:00`);
+  const days = Math.round((date.getTime() - new Date(`${today}T00:00:00`).getTime()) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === -1) return "Yesterday";
+  if (days === 1) return "Tomorrow";
+  if (Math.abs(days) < 7) {
+    return date.toLocaleDateString(undefined, { weekday: "short", day: "numeric" });
+  }
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }

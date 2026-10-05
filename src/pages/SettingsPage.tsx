@@ -1,8 +1,10 @@
-/** Screen 1e — connected calendars and the outbound ICS feed. */
+/** Settings, laid out like System Settings: a section list on the left and
+ *  inset groups of rows on the right. Calendars (connected accounts and the
+ *  outbound ICS feed) is mock data; Keybinds lists the real bindings. */
 
 import { useState } from "react";
 import { calendarAccounts, feedUrl } from "../data/mock";
-import { Rule } from "../components/primitives";
+import { Kbd, MOD_KEY } from "../components/primitives";
 
 const SECTIONS = ["General", "Calendars", "Focus & timers", "Keybinds", "Data & export"] as const;
 type Section = (typeof SECTIONS)[number];
@@ -12,20 +14,19 @@ export function SettingsPage() {
 
   return (
     <>
-      <header className="topbar">
-        <h4>Settings</h4>
-        <span className="text-muted meta" style={{ fontSize: 13 }}>
-          {section}
-        </span>
+      <header className="dt-toolbar">
+        <span className="dt-toolbar-title">Settings</span>
+        <span className="dt-muted toolbar-meta">{section}</span>
       </header>
 
-      <div className="body">
-        <nav className="settings-nav" aria-label="Settings sections">
+      <div className="dt-settings page-body">
+        <nav className="dt-settings-nav" aria-label="Settings sections">
           {SECTIONS.map((item) => (
             <button
               key={item}
               type="button"
-              className={`settings-nav-item${item === section ? " is-on" : ""}`}
+              className="dt-side-item"
+              aria-current={item === section ? "page" : undefined}
               onClick={() => setSection(item)}
             >
               {item}
@@ -33,8 +34,14 @@ export function SettingsPage() {
           ))}
         </nav>
 
-        <div className="settings-body">
-          {section === "Calendars" ? <CalendarSettings /> : <Placeholder section={section} />}
+        <div className="dt-settings-body">
+          {section === "Calendars" ? (
+            <CalendarSettings />
+          ) : section === "Keybinds" ? (
+            <KeybindSettings />
+          ) : (
+            <Placeholder section={section} />
+          )}
         </div>
       </div>
     </>
@@ -47,92 +54,117 @@ function CalendarSettings() {
 
   return (
     <>
-      <h3 style={{ margin: "0 0 6px" }}>Connected accounts</h3>
-      <p className="text-muted" style={{ fontSize: 13, margin: "0 0 18px", textWrap: "pretty" }}>
+      <h2>Connected accounts</h2>
+      <p>
         Read events in so the week view knows where your time already went. Write scheduled tasks
         back out as a separate calendar.
       </p>
-      <Rule />
 
       {/* TODO(backend): OAuth flows and sync state live in Rust. */}
-      {calendarAccounts.map((account) => (
-        <div className="account-row" key={account.id}>
-          <div className="account-badge">{account.badge}</div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 800 }}>{account.name}</div>
-            <div className="text-muted" style={{ fontSize: 12 }}>
-              {account.detail}
+      <div className="dt-group">
+        {calendarAccounts.map((account) => (
+          <div className="dt-account" key={account.id}>
+            <span className="dt-account-badge">{account.badge}</span>
+            <div>
+              <div className="dt-account-name">{account.name}</div>
+              <div className="dt-account-detail">
+                {account.connected ? account.detail : <span className="dt-status">Not connected</span>}
+              </div>
+            </div>
+            <div className="dt-account-end">
+              {account.sync === "two-way" && <span className="dt-tag dt-tag-accent">Two-way</span>}
+              <button type="button" className="dt-btn">
+                {account.connected ? "Manage" : "Connect"}
+              </button>
             </div>
           </div>
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-            {account.sync === "two-way" && <span className="tag tag-accent">Two-way</span>}
-            <button type="button" className="btn btn-secondary">
-              {account.connected ? "Manage" : "Connect"}
+        ))}
+      </div>
+
+      <h2>Publish your tasks</h2>
+      <p>A read-only ICS feed of every scheduled task. Subscribe from any client.</p>
+
+      <div className="dt-group">
+        <div className="dt-form-stack">
+          <label className="dt-label" htmlFor="feed-url">
+            Feed URL
+          </label>
+          <div className="settings-inline">
+            <input id="feed-url" className="dt-input dt-input-mono" readOnly value={feedUrl} />
+            <button
+              type="button"
+              className="dt-btn dt-btn-primary"
+              onClick={() => {
+                void navigator.clipboard?.writeText(feedUrl);
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
             </button>
           </div>
         </div>
-      ))}
-
-      <h3 style={{ margin: "34px 0 6px" }}>Publish your tasks</h3>
-      <p className="text-muted" style={{ fontSize: 13, margin: "0 0 16px" }}>
-        A read-only ICS feed of every scheduled task. Subscribe from any client.
-      </p>
-
-      <div className="field" style={{ marginBottom: 14 }}>
-        <label htmlFor="feed-url">Feed URL</label>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            id="feed-url"
-            className="input"
-            readOnly
-            value={feedUrl}
-            style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5 }}
-          />
-          <button
-            type="button"
-            className="btn btn-primary"
-            style={{ flex: "none" }}
-            onClick={() => {
-              void navigator.clipboard?.writeText(feedUrl);
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1500);
-            }}
-          >
-            {copied ? "Copied" : "Copy"}
+        <div className="dt-form-row">
+          <label className="dt-radio">
+            <input
+              type="radio"
+              name="feed"
+              checked={feedScope === "scheduled"}
+              onChange={() => setFeedScope("scheduled")}
+            />
+            <span className="dt-dot" />
+            Scheduled tasks only
+          </label>
+          <span />
+        </div>
+        <div className="dt-form-row">
+          <label className="dt-radio">
+            <input
+              type="radio"
+              name="feed"
+              checked={feedScope === "due"}
+              onChange={() => setFeedScope("due")}
+            />
+            <span className="dt-dot" />
+            Everything with a due date
+          </label>
+          <span />
+        </div>
+        <div className="dt-form-row">
+          <button type="button" className="dt-btn">
+            Download .ics once
+          </button>
+          <button type="button" className="dt-btn dt-btn-danger">
+            Revoke and regenerate
           </button>
         </div>
       </div>
+    </>
+  );
+}
 
-      <div style={{ display: "flex", gap: 22, alignItems: "center", marginBottom: 8 }}>
-        <label className="radio">
-          <input
-            type="radio"
-            name="feed"
-            checked={feedScope === "scheduled"}
-            onChange={() => setFeedScope("scheduled")}
-          />
-          <span className="dot" />
-          Scheduled tasks only
-        </label>
-        <label className="radio">
-          <input
-            type="radio"
-            name="feed"
-            checked={feedScope === "due"}
-            onChange={() => setFeedScope("due")}
-          />
-          <span className="dot" />
-          Everything with a due date
-        </label>
-      </div>
+/** The bindings App.tsx and the screens actually register. */
+const KEYBINDS: [string, string][] = [
+  ["1 – 5", "Tasks, Calendar, Focus, Graph, Settings"],
+  [`${MOD_KEY}K`, "Command palette"],
+  ["N", "New task (Tasks)"],
+  ["Esc", "Close the palette, the compose row or the task detail"],
+  ["Space", "Pause or resume the focus timer"],
+  ["Shift", "Hold while dragging a calendar block to copy it"],
+];
 
-      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-        <button type="button" className="btn btn-secondary">
-          Download .ics once
-        </button>
-        <button type="button" className="btn btn-ghost">
-          Revoke and regenerate
-        </button>
+function KeybindSettings() {
+  return (
+    <>
+      <h2>Keybinds</h2>
+      <p>Every screen is reachable from the keyboard. Bindings are fixed for now.</p>
+      <div className="dt-group">
+        {KEYBINDS.map(([keys, action]) => (
+          <div className="dt-form-row" key={keys}>
+            <span>{action}</span>
+            <Kbd>{keys}</Kbd>
+          </div>
+        ))}
       </div>
     </>
   );
@@ -141,10 +173,8 @@ function CalendarSettings() {
 function Placeholder({ section }: { section: string }) {
   return (
     <>
-      <h3 style={{ margin: "0 0 6px" }}>{section}</h3>
-      <p className="text-muted" style={{ fontSize: 13 }}>
-        Not designed yet — the mockups only cover Calendars.
-      </p>
+      <h2>{section}</h2>
+      <p>Nothing to configure here yet.</p>
     </>
   );
 }

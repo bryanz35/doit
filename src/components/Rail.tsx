@@ -1,12 +1,17 @@
-/** Left navigation. Collapsed (64px, screens 1a–1f) or expanded (variation 2c). */
+/** Left navigation. Collapsed, it is the 64px icon rail; expanded, the
+ *  Reminders-style sidebar: smart-list tiles, the lists, then the app's
+ *  sections. The logo mark toggles between the two. */
 
-import { useMemo } from "react";
-import type { PageId } from "../types";
+import type { PageId, TaskScope } from "../types";
 import { useApp } from "../data/store";
+import { SMART_LISTS, listColor, openLists, sameScope, smartCount, type SmartId } from "../data/scope";
 import {
+  AlertIcon,
   CalendarIcon,
+  CheckIcon,
   FocusIcon,
   GraphIcon,
+  InboxIcon,
   SettingsIcon,
   TasksIcon,
 } from "./icons";
@@ -17,7 +22,7 @@ interface NavItem {
   label: string;
   key: string;
   Icon: typeof TasksIcon;
-  /** Settings sits at the bottom of the rail. */
+  /** Settings sits at the bottom of the collapsed rail. */
   bottom?: boolean;
 }
 
@@ -29,6 +34,13 @@ export const NAV_ITEMS: NavItem[] = [
   { id: "settings", label: "Settings", key: "5", Icon: SettingsIcon, bottom: true },
 ];
 
+const SMART_ICONS: Record<SmartId, typeof TasksIcon> = {
+  today: CalendarIcon,
+  overdue: AlertIcon,
+  all: InboxIcon,
+  completed: CheckIcon,
+};
+
 interface RailProps {
   page: PageId;
   onNavigate: (page: PageId) => void;
@@ -37,90 +49,111 @@ interface RailProps {
 }
 
 export function Rail({ page, onNavigate, expanded, onToggleExpanded }: RailProps) {
-  const { tasks } = useApp();
+  const { tasks, today, scope, setScope } = useApp();
 
-  // Lists are a plain column on `tasks`, not a table of their own, so the rail
-  // counts the open tasks per distinct value. Tasks with no list are grouped
-  // under "Inbox", which is the name the mockups use for the same idea.
-  const lists = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const task of tasks) {
-      if (task.status === "done") continue;
-      const name = task.list ?? "Inbox";
-      counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return [...counts].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [tasks]);
-
-  if (expanded) {
+  if (!expanded) {
     return (
-      <nav className="rail rail-wide" aria-label="Main">
+      <nav className="dt-rail" aria-label="Main">
         <button
           type="button"
-          className="rail-brand"
+          className="dt-rail-mark app-mark"
           onClick={onToggleExpanded}
-          title="Collapse the rail"
-          style={{ background: "transparent", border: 0, cursor: "pointer", font: "inherit", color: "inherit" }}
-        >
-          <span className="rail-brand-mark" />
-          <span className="rail-brand-name">doit</span>
-        </button>
-        {NAV_ITEMS.map(({ id, label, key, Icon, bottom }) => (
+          title="Expand the sidebar"
+          aria-label="Expand the sidebar"
+        />
+        {NAV_ITEMS.map(({ id, label, Icon, bottom }) => (
           <button
             key={id}
             type="button"
+            title={label}
+            aria-label={label}
             aria-current={page === id ? "page" : undefined}
-            className={`rail-link${page === id ? " railon" : ""}`}
-            style={bottom ? { marginTop: "auto" } : undefined}
+            className={`dt-rail-item${bottom ? " dt-rail-bottom" : ""}`}
             onClick={() => onNavigate(id)}
           >
             <Icon />
-            {label}
-            <span style={{ marginLeft: "auto" }}>
-              <Kbd onAccent={page === id}>{key}</Kbd>
-            </span>
           </button>
         ))}
-        <div className="rail-divider" />
-        <div className="rail-lists">
-          <h6 style={{ margin: "0 0 8px", color: "var(--color-neutral-700)" }}>Lists</h6>
-          {lists.length === 0 && (
-            <div className="rail-list-row text-muted">No lists yet</div>
-          )}
-          {lists.map((list) => (
-            <div className="rail-list-row" key={list.name}>
-              <span>{list.name}</span>
-              <span className="text-muted" style={{ marginLeft: "auto" }}>
-                {list.count}
-              </span>
-            </div>
-          ))}
-        </div>
       </nav>
     );
   }
 
+  const open = (next: TaskScope) => {
+    setScope(next);
+    onNavigate("tasks");
+  };
+  const current = (candidate: TaskScope) => page === "tasks" && sameScope(scope, candidate);
+
   return (
-    <nav className="rail" aria-label="Main">
+    <nav className="dt-sidebar" aria-label="Main">
       <button
         type="button"
-        className="rail-mark"
+        className="sidebar-brand"
         onClick={onToggleExpanded}
-        title="Expand the rail"
-        style={{ border: 0, cursor: "pointer", padding: 0 }}
-        aria-label="Expand the rail"
-      />
-      {NAV_ITEMS.map(({ id, label, Icon, bottom }) => (
+        title="Collapse the sidebar"
+      >
+        <span className="dt-rail-mark app-mark" aria-hidden="true" />
+        doit
+      </button>
+
+      <div className="dt-tiles">
+        {SMART_LISTS.map(({ id, label, color }) => {
+          const Icon = SMART_ICONS[id];
+          const tile: TaskScope = { kind: "smart", id };
+          return (
+            <button
+              key={id}
+              type="button"
+              className="dt-tile"
+              data-color={color}
+              aria-current={current(tile) ? "true" : undefined}
+              onClick={() => open(tile)}
+            >
+              <span className="dt-disc">
+                <Icon size={14} stroke={id === "overdue" || id === "completed" ? 3 : 2.5} />
+              </span>
+              <span className="dt-tile-count">{smartCount(tasks, id, today)}</span>
+              <span className="dt-tile-name">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="dt-side-head">My Lists</div>
+      {openLists(tasks).map(({ name, count }) => {
+        const list: TaskScope = { kind: "list", name };
+        return (
+          <button
+            key={name}
+            type="button"
+            className="dt-side-item"
+            data-color={listColor(name)}
+            aria-current={current(list) ? "true" : undefined}
+            onClick={() => open(list)}
+          >
+            <span className="dt-disc dt-disc-sm">
+              <TasksIcon size={12} stroke={2.5} />
+            </span>
+            {name}
+            <span className="dt-count">{count}</span>
+          </button>
+        );
+      })}
+
+      <div className="dt-side-head sidebar-sections">doit</div>
+      {NAV_ITEMS.map(({ id, label, key, Icon }) => (
         <button
           key={id}
           type="button"
-          title={label}
-          aria-label={label}
+          className="dt-side-item"
           aria-current={page === id ? "page" : undefined}
-          className={`railitem${page === id ? " railon" : ""}${bottom ? " rail-spacer" : ""}`}
           onClick={() => onNavigate(id)}
         >
-          <Icon />
+          <Icon size={16} />
+          {label}
+          <span className="dt-count">
+            <Kbd>{key}</Kbd>
+          </span>
         </button>
       ))}
     </nav>

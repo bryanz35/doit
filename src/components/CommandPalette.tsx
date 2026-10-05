@@ -1,18 +1,21 @@
-/** ⌘K palette — screen 1f. Actions are UI-only stubs for now. */
+/** ⌘K palette — a floating search panel in the style of Spotlight. The
+ *  scheduling actions are UI-only stubs for now; creating a task is real. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../data/store";
-import { SearchIcon } from "./icons";
-import { CheckBox, Kbd } from "./primitives";
+import { listColor } from "../data/scope";
+import { CalendarIcon, FocusIcon, PlusIcon, SearchIcon } from "./icons";
+import { Kbd, dueLabel } from "./primitives";
 
 interface Action {
   id: string;
   label: string;
+  Icon: typeof PlusIcon;
   run: () => void;
 }
 
 export function CommandPalette() {
-  const { tasks, paletteOpen, setPaletteOpen, selectTask, setPage, addTask, setComposeOpen } =
+  const { tasks, paletteOpen, setPaletteOpen, selectTask, setPage, addTask, setComposeOpen, today } =
     useApp();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -51,6 +54,7 @@ export function CommandPalette() {
           // Quick-add sigils work here too, so the label echoes the raw line
           // rather than the parsed title.
           label: `Create task “${typed}”`,
+          Icon: PlusIcon,
           run: () => {
             void addTask(typed);
             setPage("tasks");
@@ -59,6 +63,7 @@ export function CommandPalette() {
       : {
           id: "create-empty",
           label: "New task…",
+          Icon: PlusIcon,
           run: () => {
             setPage("tasks");
             setComposeOpen(true);
@@ -76,6 +81,7 @@ export function CommandPalette() {
       {
         id: "schedule-today",
         label: `Schedule “${target.title}” → today 12:00`,
+        Icon: CalendarIcon,
         run: () => {
           selectTask(target.id);
           setPage("calendar");
@@ -84,6 +90,7 @@ export function CommandPalette() {
       {
         id: "schedule-later",
         label: `Schedule “${target.title}” → Fri 22, 09:00`,
+        Icon: CalendarIcon,
         run: () => {
           selectTask(target.id);
           setPage("calendar");
@@ -92,6 +99,7 @@ export function CommandPalette() {
       {
         id: "focus",
         label: `Start focus session on “${target.title}”`,
+        Icon: FocusIcon,
         run: () => {
           selectTask(target.id);
           setPage("focus");
@@ -121,26 +129,21 @@ export function CommandPalette() {
   };
 
   return (
-    <div
-      className="palette-backdrop"
-      onClick={close}
-      role="presentation"
-    >
+    <div className="dt-scrim palette-scrim" onClick={close} role="presentation">
       <div
-        className="palette"
+        className="dt-palette"
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="palette-search">
-          <span style={{ color: "var(--color-accent)", display: "flex" }}>
-            <SearchIcon />
-          </span>
+        <div className="dt-palette-search">
+          <SearchIcon size={20} />
           <input
             ref={inputRef}
-            className="palette-input"
-            placeholder="Search tasks and actions…"
+            className="dt-palette-input"
+            placeholder="Search tasks and actions"
+            aria-label="Search tasks and actions"
             value={query}
             onChange={(event) => {
               setQuery(event.currentTarget.value);
@@ -163,58 +166,59 @@ export function CommandPalette() {
           <Kbd>Esc</Kbd>
         </div>
 
-        <div className="palette-list">
-          {actions.length > 0 && (
-            <div className="palette-section">
-              <h6 style={{ margin: 0, color: "var(--color-neutral-700)" }}>Actions</h6>
-            </div>
-          )}
+        <div className="dt-palette-list" role="listbox">
+          {actions.length > 0 && <div className="dt-palette-section">Actions</div>}
           {actions.map((action, index) => (
             <button
               key={action.id}
               type="button"
-              className={`palette-item${cursor === index ? " palette-item-on" : ""}`}
+              role="option"
+              aria-selected={cursor === index}
+              className="dt-palette-item"
               onMouseEnter={() => setCursor(index)}
               onClick={() => commit(index)}
             >
+              <action.Icon size={16} />
               {action.label}
-              {cursor === index && (
-                <span style={{ marginLeft: "auto", font: "600 10px ui-monospace, Menlo, monospace", opacity: 0.8 }}>
-                  ↵
-                </span>
-              )}
+              {cursor === index && <span className="dt-trail">↵</span>}
             </button>
           ))}
 
-          {matches.length > 0 && (
-            <div className="palette-section" style={{ marginTop: 6 }}>
-              <h6 style={{ margin: 0, color: "var(--color-neutral-700)" }}>Tasks</h6>
-            </div>
-          )}
+          {matches.length > 0 && <div className="dt-palette-section">Tasks</div>}
           {matches.map((task, index) => {
             const rowIndex = actions.length + index;
             return (
               <button
                 key={task.id}
                 type="button"
-                className={`palette-item${cursor === rowIndex ? " palette-item-on" : ""}`}
+                role="option"
+                aria-selected={cursor === rowIndex}
+                className="dt-palette-item"
+                data-color={listColor(task.list)}
                 onMouseEnter={() => setCursor(rowIndex)}
                 onClick={() => commit(rowIndex)}
               >
-                <CheckBox label={task.title} />
+                <span className="dt-check" aria-hidden="true" />
                 {task.title}
-                <span className="text-muted" style={{ marginLeft: "auto", fontSize: 12 }}>
-                  {task.due ?? "Someday"}
-                </span>
+                <span className="dt-trail">{dueLabel(task.due, today)}</span>
               </button>
             );
           })}
 
-          {rows.length === 0 && (
-            <div className="palette-section text-muted" style={{ fontSize: 13 }}>
-              No matches.
-            </div>
-          )}
+          {rows.length === 0 && <div className="dt-palette-section">No matches.</div>}
+        </div>
+
+        <div className="dt-palette-foot">
+          <span>
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> move
+          </span>
+          <span>
+            <Kbd>↵</Kbd> run
+          </span>
+          <span>
+            <Kbd>Esc</Kbd> close
+          </span>
         </div>
       </div>
     </div>

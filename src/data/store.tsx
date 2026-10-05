@@ -15,7 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { PageId, Task, TaskPatch } from "../types";
+import type { PageId, Task, TaskPatch, TaskScope } from "../types";
 import { parseQuickAdd } from "./quickadd";
 import { localZone } from "./instants";
 
@@ -28,6 +28,9 @@ interface AppState {
   /** Whether the tasks screen is showing its compose row. Lives here, not in
    *  TasksPage, so the `N` keybind and the palette can open it from anywhere. */
   composeOpen: boolean;
+  /** Which smart list or list the tasks screen shows. Here rather than in
+   *  TasksPage because the sidebar, which lives in the shell, sets it. */
+  scope: TaskScope;
 
   /** False until the first `list_tasks` settles, so an empty list can be told
    *  apart from a list that has not arrived yet. */
@@ -55,6 +58,7 @@ interface AppState {
   refresh: () => void;
   setPaletteOpen: (open: boolean) => void;
   setComposeOpen: (open: boolean) => void;
+  setScope: (scope: TaskScope) => void;
 
   today: string;
   taskById: (id: string | null | undefined) => Task | undefined;
@@ -96,6 +100,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [page, setPage] = useState<PageId>(pageFromHash());
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [scope, setScope] = useState<TaskScope>({ kind: "smart", id: "all" });
 
   const [today] = useState(todayIso);
 
@@ -256,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       page,
       paletteOpen,
       composeOpen,
+      scope,
       loaded,
       error,
       setPage,
@@ -271,6 +277,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refresh,
       setPaletteOpen,
       setComposeOpen,
+      setScope,
       today,
       taskById: (id) => (id ? tasks.find((task) => task.id === id) : undefined),
     }),
@@ -280,6 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       page,
       paletteOpen,
       composeOpen,
+      scope,
       loaded,
       error,
       toggleTask,
