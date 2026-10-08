@@ -6,6 +6,7 @@ The visual language comes from the DOIT design system artifact (https://claude.a
 - A list's colour is not stored: `src/data/scope.ts` hashes the list name to a `list-*` hue (`listColor`; Inbox is blue). The same file defines the sidebar's smart lists (Today/Overdue/All/Completed) and `inScope`, which the tasks screen filters by; the current `scope` is view state in the store because the sidebar sets it.
 - `src/styles/app.css` holds app chrome only (shell layout, scroll containers, calendar gesture states), built from those tokens. New UI should reach for a design-system class first and add here only when the system has no class for it.
 - No router: `page` is state in `src/data/store.tsx`, keybinds `1`–`5` switch it, and the URL hash seeds the initial page so a screen can be deep-linked during development (`http://localhost:1420/#graph`).
+- The window stays open for days, so "now" is never read once and kept: `today` comes from the store, which ticks it through `useToday` in `src/data/clock.ts` (re-read each minute boundary and on focus/visibility, surviving suspend); anything finer, like the calendar's now-line, uses `useClock`. Don't seed state from `new Date()` and keep it.
 
 **Dragging inside the app is pointer events, not HTML5 drag-and-drop.** This is the default for any new gesture — moving, resizing, reordering, panning, pulling a graph edge. Model it on `Move`/`Resize` in `CalendarPage.tsx`; the legacy DnD on the calendar's chips is the exception, not the pattern to copy.
 

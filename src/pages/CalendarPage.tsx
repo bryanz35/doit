@@ -22,6 +22,7 @@ import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, RefOb
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useApp } from "../data/store";
+import { useClock } from "../data/clock";
 import type { Task, TaskBlock } from "../types";
 import { atMinutes, clockOf, durationMinutes } from "../data/instants";
 import { listColor } from "../data/scope";
@@ -76,20 +77,6 @@ function useMediaQuery(query: string) {
     return () => list.removeEventListener("change", onChange);
   }, [query]);
   return matches;
-}
-
-/** Minutes past local midnight, re-read every 30s so the now-line creeps. */
-function useNowMinutes() {
-  const read = () => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  };
-  const [minutes, setMinutes] = useState(read);
-  useEffect(() => {
-    const timer = window.setInterval(() => setMinutes(read()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  return minutes;
 }
 
 /** One step of a touchpad pinch, from `src-tauri/src/pinch.rs`: WebKitGTK
@@ -649,6 +636,15 @@ export function CalendarPage() {
   // The date the view is anchored on: the day Day shows, the week Week shows, the
   // month Month shows. Stepping moves it by one of whichever unit is on screen.
   const [anchor, setAnchor] = useState(today);
+  // Left open past midnight, a view that was on today follows it — otherwise Day
+  // strands on yesterday, and Week on last week the night Sunday ends. A view
+  // stepped elsewhere stays where it was put.
+  const shownToday = useRef(today);
+  useEffect(() => {
+    const previous = shownToday.current;
+    shownToday.current = today;
+    setAnchor((current) => (current === previous ? today : current));
+  }, [today]);
   const narrow = useMediaQuery(NARROW_QUERY);
 
   // The chosen density is kept, so widening the window restores Week.
@@ -1113,7 +1109,9 @@ function WeekGrid({
 }) {
   const { drag, today } = chipProps;
   const hours = Array.from({ length: 24 }, (_, i) => i);
-  const nowMinutes = useNowMinutes();
+  // Its own date, not `today`: both come from one reading, so across midnight
+  // the line never sits at 00:00 on the day that just ended.
+  const now = useClock();
   const yFor = (minutes: number) => (minutes / 60) * hourPx;
 
   const cellClass = (base: string, date: string) =>
@@ -1216,7 +1214,7 @@ function WeekGrid({
                 </div>
               </div>
             )}
-            {date === today && <div className="dt-now" style={{ top: yFor(nowMinutes) }} />}
+            {date === now.date && <div className="dt-now" style={{ top: yFor(now.minutes) }} />}
           </div>
         ))}
       </div>
