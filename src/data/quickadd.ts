@@ -17,6 +17,8 @@ export interface QuickAdd {
   title: string;
   /** YYYY-MM-DD, or null for an explicit `@someday` (unscheduled). */
   due: string | null;
+  /** Whether the line named its own date; `due` falls back to today when not. */
+  dueGiven: boolean;
   list?: string;
   estimateMinutes?: number;
   tags: string[];
@@ -110,6 +112,7 @@ export function parseQuickAdd(input: string, today: string): QuickAdd {
     // No `@…` at all means the task lands on today, matching the Today screen
     // the compose row lives on. `@someday` is the way to opt out.
     due: due === undefined ? today : due,
+    dueGiven: due !== undefined,
     list,
     estimateMinutes,
     tags,

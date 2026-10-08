@@ -39,7 +39,9 @@ function Shell() {
       }
       if (typing || paletteOpen) return;
 
-      const nav = NAV_ITEMS.find((item) => item.key === event.key);
+      // On the task list digits are vim counts (`3j`); it switches pages with
+      // `g1`…`g5` itself.
+      const nav = page === "tasks" ? undefined : NAV_ITEMS.find((item) => item.key === event.key);
       if (nav) {
         event.preventDefault();
         // Never unmount a page while something inside it holds focus — the
@@ -50,7 +52,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [paletteOpen, composeOpen, setPage, setPaletteOpen, setComposeOpen, selectTask]);
+  }, [page, paletteOpen, composeOpen, setPage, setPaletteOpen, setComposeOpen, selectTask]);
 
   return (
     <div className="shell dt">

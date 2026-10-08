@@ -190,3 +190,11 @@ body { overflow: hidden; }
 }
 .dt-palette { display: flex; flex-direction: column; max-height: calc(100% - 144px); }
 .dt-palette-list { overflow-y: auto; }
+
+/* The inline title editor a task row swaps in for `i` / `a` / `cc`. */
+.row-title-edit { display: flex; }
+.row-title-input {
+  flex: 1; min-width: 0; border: 0; background: transparent; padding: 0;
+  font: inherit; color: var(--label); caret-color: var(--accent);
+}
+.row-title-input:focus-visible { outline: none; }

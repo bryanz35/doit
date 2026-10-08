@@ -5,26 +5,44 @@
  * data/quickadd.ts); what it parsed to is echoed under the field so the sigils
  * are discoverable without a legend. */
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "../data/store";
 import { parseQuickAdd } from "../data/quickadd";
 import { INBOX } from "../data/scope";
+import type { Task } from "../types";
 import { PlusIcon } from "./icons";
 import { Kbd, dueLabel, formatMinutes } from "./primitives";
+import { TitleInput } from "./TitleInput";
 
-export function AddTaskRow() {
+export function AddTaskRow({
+  vim = false,
+  anchor,
+  onCreated,
+}: {
+  /** Opened by `o`/`O` on the list: Esc adds what was typed, as leaving
+   *  insert mode keeps the new line in vim, rather than discarding it. */
+  vim?: boolean;
+  /** The task this row was opened next to. The new task takes its due date and
+   *  list unless the line names its own, so it lands in the same section. */
+  anchor?: Task;
+  /** A task was added and the row stays open for the next. */
+  onCreated?: (task: Task) => void;
+}) {
   const { addTask, setComposeOpen, today, scope } = useApp();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Adding while a list is open files the task there unless the line names its
   // own `/list` — the sigil cannot spell a name with a space, so neither can
   // this, and Inbox is simply no list.
   const line = useMemo(() => {
-    if (scope.kind !== "list" || scope.name === INBOX || /\s/.test(scope.name)) return draft;
-    return parseQuickAdd(draft, today).list ? draft : `${draft} /${scope.name}`;
-  }, [draft, scope, today]);
+    const own = parseQuickAdd(draft, today);
+    let text = draft;
+    if (anchor && !own.dueGiven) text += ` @${anchor.due ?? "someday"}`;
+    const list = anchor ? anchor.list : scope.kind === "list" ? scope.name : undefined;
+    if (!own.list && list && list !== INBOX && !/\s/.test(list)) text += ` /${list}`;
+    return text;
+  }, [draft, scope, today, anchor]);
   const parsed = useMemo(() => parseQuickAdd(line, today), [line, today]);
 
   const close = () => {
@@ -32,17 +50,24 @@ export function AddTaskRow() {
     setComposeOpen(false);
   };
 
-  const submit = async () => {
-    if (!parsed.title || busy) return;
+  const submit = async (closeAfter = false) => {
+    if (busy) return;
+    if (!parsed.title) {
+      if (closeAfter) close();
+      return;
+    }
     setBusy(true);
     const created = await addTask(line);
     setBusy(false);
+    if (!created) return;
+    if (closeAfter) {
+      close();
+      return;
+    }
     // Adding several in a row is the common case, so the field clears and keeps
     // focus rather than closing. Escape (or blurring an empty field) closes it.
-    if (created) {
-      setDraft("");
-      inputRef.current?.focus();
-    }
+    setDraft("");
+    onCreated?.(created);
   };
 
   return (
@@ -55,31 +80,29 @@ export function AddTaskRow() {
         }}
       >
         <span className="dt-check dt-check-add" />
-        <input
-          ref={inputRef}
-          autoFocus
+        <TitleInput
           className="dt-add-input"
-          aria-label="New task"
+          label="New task"
           placeholder="Add a task…  @tomorrow  #api  /Work  =45m"
           value={draft}
           disabled={busy}
-          onChange={(event) => setDraft(event.currentTarget.value)}
+          onChange={setDraft}
+          /* Enter is vim's newline: add, then keep composing (under the new
+             task, for `o`/`O`). */
+          onEnter={() => void submit()}
+          onEscape={() => (vim ? void submit(true) : close())}
           /* Only an abandoned empty row closes itself. Blurring with text in it
              (clicking a row, alt-tabbing) must not silently commit or discard
-             what was typed — Enter commits, Escape discards. */
+             what was typed. */
           onBlur={() => {
             if (!draft.trim()) close();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              close();
-            }
-          }}
         />
-        <span className="dt-add-hint">
-          <Kbd>↵</Kbd> add <Kbd>Esc</Kbd> close
-        </span>
+        {!vim && (
+          <span className="dt-add-hint">
+            <Kbd>↵</Kbd> add <Kbd>Esc</Kbd> close
+          </span>
+        )}
       </form>
 
       {/* The echo only earns its line once there is something to echo. */}
