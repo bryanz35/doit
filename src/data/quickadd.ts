@@ -37,8 +37,8 @@ function addDays(iso: string, days: number): string {
 /** `@…` → an ISO date, `null` for someday, `undefined` when unrecognised. */
 function parseDue(word: string, today: string): string | null | undefined {
   const value = word.toLowerCase();
-  if (value === "today") return today;
-  if (value === "tomorrow" || value === "tmr") return addDays(today, 1);
+  if (value === "today" || value === "td") return today;
+  if (value === "tomorrow" || value === "tmr" || value == "tmrw") return addDays(today, 1);
   if (value === "yesterday") return addDays(today, -1);
   if (value === "someday" || value === "none") return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
