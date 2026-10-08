@@ -18,6 +18,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { PageId, Task, TaskPatch, TaskScope } from "../types";
 import { parseQuickAdd } from "./quickadd";
 import { localZone } from "./instants";
+import { todayIso, useToday } from "./clock";
 
 interface AppState {
   tasks: Task[];
@@ -73,16 +74,6 @@ function pageFromHash(): PageId {
   return PAGES.includes(hash as PageId) ? (hash as PageId) : "tasks";
 }
 
-/** Local calendar date as YYYY-MM-DD — the same shape the `due` column stores.
- *  `toISOString()` would be wrong here: it converts to UTC first, so an evening
- *  west of Greenwich reports tomorrow. */
-function todayIso(): string {
-  const now = new Date();
-  const month = `${now.getMonth() + 1}`.padStart(2, "0");
-  const day = `${now.getDate()}`.padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
 /** A rejected `invoke` throws whatever the command's `Err` serialized to — for
  *  AppError that is the `#[error("...")]` string. Anything else is a bug on our
  *  side (bad command name, missing handler entry) and still needs showing. */
@@ -102,7 +93,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [composeOpen, setComposeOpen] = useState(false);
   const [scope, setScope] = useState<TaskScope>({ kind: "smart", id: "all" });
 
-  const [today] = useState(todayIso);
+  // Rolls over at midnight: the window can stay open for days, and every
+  // overdue/today/later split downstream reads this.
+  const today = useToday();
 
   /** Replace one task in place, keeping the backend's ordering. */
   const merge = useCallback((task: Task) => {
