@@ -4,9 +4,14 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::collections::{HashMap, HashSet};
 
 /// Every column `row_to_task` reads, in one place. `row_to_task` looks columns
-/// up by name, so any SELECT feeding it must list all of these.
+/// up by name, so any SELECT feeding it must list all of these. Only valid
+/// against `FROM tasks` unaliased: `pomodoros_done` is a correlated subquery on
+/// `tasks.id`.
 const TASK_COLUMNS: &str =
-    "id, title, notes, status, due, estimate_minutes, pomodoros, list, repo, completed_at";
+    "id, title, notes, status, due, estimate_minutes, pomodoros, list, repo, completed_at,
+     (SELECT COUNT(*) FROM focus_sessions f
+       WHERE f.task_id = tasks.id AND f.kind = 'work' AND f.outcome = 'completed')
+       AS pomodoros_done";
 
 /// Same contract as TASK_COLUMNS, for `row_to_block`.
 const BLOCK_COLUMNS: &str = "id, task_id, start_at, end_at, tz";
@@ -39,16 +44,22 @@ fn check_due(due: Option<&str>) -> Result<()> {
 ///
 /// The round-trip re-format is the same trick `check_due` uses for zero padding:
 /// parse, print canonically, and insist the input already said that.
-fn check_instant(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
+pub(crate) fn check_instant(value: &str) -> Result<chrono::DateTime<chrono::Utc>> {
     let parsed = chrono::DateTime::parse_from_rfc3339(value)
         .map_err(|_| AppError::Invalid(format!("timestamp must be RFC3339, received {value:?}")))?
         .with_timezone(&chrono::Utc);
-    if parsed.format("%Y-%m-%dT%H:%M:%SZ").to_string() != value {
+    if format_instant(parsed) != value {
         return Err(AppError::Invalid(format!(
             "timestamp must be UTC as YYYY-MM-DDTHH:MM:SSZ, received {value:?}"
         )));
     }
     Ok(parsed)
+}
+
+/// The inverse of `check_instant`: the one spelling it accepts. Sub-second
+/// precision is dropped, not rounded.
+pub(crate) fn format_instant(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 /// Both ends valid and the span non-empty. The schema repeats the ordering
@@ -130,6 +141,11 @@ pub fn create_task(
 
 pub fn update_task(conn: &Connection, id: &str, patch: &TaskPatch) -> Result<Task> {
     check_due(patch.due.as_deref())?;
+    // Same rule as create_task: trimmed, never empty.
+    let title = patch.title.as_deref().map(str::trim);
+    if title == Some("") {
+        return Err(AppError::Invalid("Title must not be empty".into()));
+    }
 
     // Each column is COALESCE(?n, column): a NULL parameter leaves it alone.
     // completed_at is derived from the status transition instead — stamped when
@@ -150,7 +166,7 @@ pub fn update_task(conn: &Connection, id: &str, patch: &TaskPatch) -> Result<Tas
             END
         WHERE id = ?6",
         params![
-            patch.title,
+            title,
             patch.notes,
             patch.status,
             patch.due,
@@ -234,6 +250,7 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         list: row.get("list")?,
         repo: row.get("repo")?,
         completed_at: row.get("completed_at")?,
+        pomodoros_done: row.get("pomodoros_done")?,
         tags: Vec::new(),
         depends_on: Vec::new(),
         blocks: Vec::new(),
@@ -260,6 +277,16 @@ fn get_task(conn: &Connection, id: &str) -> Result<Task> {
     task.depends_on = deps_for(conn, id)?;
     task.blocks = blocks_for(conn, id)?;
     Ok(task)
+}
+
+/// Just the title, for text outside the task list (the focus alarm's
+/// notification). `None` if the task is gone.
+pub(crate) fn title_of(conn: &Connection, id: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT title FROM tasks WHERE id = ?1", params![id], |r| {
+            r.get(0)
+        })
+        .optional()?)
 }
 
 fn tags_for(conn: &Connection, id: &str) -> Result<Vec<String>> {
@@ -335,7 +362,7 @@ pub fn set_task_deps(conn: &mut Connection, id: &str, depends_on: &[String]) -> 
         .collect();
     cleaned.sort_unstable();
     cleaned.dedup();
-    if cleaned.iter().any(|d| *d == id) {
+    if cleaned.contains(&id) {
         return Err(AppError::Invalid("A task cannot depend on itself".into()));
     }
     let tx = conn.transaction()?;
@@ -535,6 +562,25 @@ mod tests {
         assert_eq!(updated.estimate_minutes, Some(45));
         assert_eq!(updated.due.as_deref(), Some("2026-09-10")); // untouched
         assert_eq!(updated.status, TaskStatus::Todo);
+    }
+
+    #[test]
+    fn update_trims_the_title_and_rejects_an_empty_one() {
+        let mut conn = fresh();
+        let t = create_task(&mut conn, "old", None, None).unwrap();
+        let rename = |title: &str| TaskPatch {
+            title: Some(title.into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            update_task(&conn, &t.id, &rename("  new  ")).unwrap().title,
+            "new"
+        );
+        assert!(matches!(
+            update_task(&conn, &t.id, &rename("   ")),
+            Err(AppError::Invalid(_))
+        ));
+        assert_eq!(get_task(&conn, &t.id).unwrap().title, "new");
     }
 
     #[test]
@@ -774,8 +820,8 @@ mod tests {
         want.sort();
         assert_eq!(got.depends_on, want);
 
-        let got = set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
-        assert_eq!(got.depends_on, [b.id.clone()]);
+        let got = set_task_deps(&mut conn, &a.id, std::slice::from_ref(&b.id)).unwrap();
+        assert_eq!(got.depends_on, std::slice::from_ref(&b.id));
         let rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM task_deps", [], |r| r.get(0))
             .unwrap();
@@ -787,7 +833,7 @@ mod tests {
         let mut conn = fresh();
         let a = create_task(&mut conn, "a", None, None).unwrap();
         assert!(matches!(
-            set_task_deps(&mut conn, &a.id, &[a.id.clone()]),
+            set_task_deps(&mut conn, &a.id, std::slice::from_ref(&a.id)),
             Err(AppError::Invalid(_))
         ));
     }
@@ -802,18 +848,18 @@ mod tests {
         let d = create_task(&mut conn, "d", None, None).unwrap();
 
         // a -> b -> c, plus a harmless existing edge on c we expect to survive.
-        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
-        set_task_deps(&mut conn, &b.id, &[c.id.clone()]).unwrap();
-        set_task_deps(&mut conn, &c.id, &[d.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &a.id, std::slice::from_ref(&b.id)).unwrap();
+        set_task_deps(&mut conn, &b.id, std::slice::from_ref(&c.id)).unwrap();
+        set_task_deps(&mut conn, &c.id, std::slice::from_ref(&d.id)).unwrap();
 
         // Closing the loop c -> a must be refused.
         assert!(matches!(
-            set_task_deps(&mut conn, &c.id, &[a.id.clone()]),
+            set_task_deps(&mut conn, &c.id, std::slice::from_ref(&a.id)),
             Err(AppError::Invalid(_))
         ));
         assert_eq!(
             get_task(&conn, &c.id).unwrap().depends_on,
-            [d.id.clone()],
+            std::slice::from_ref(&d.id),
             "the rejected write rolled back"
         );
     }
@@ -827,8 +873,8 @@ mod tests {
         let c = create_task(&mut conn, "c", None, None).unwrap();
         let d = create_task(&mut conn, "d", None, None).unwrap();
 
-        set_task_deps(&mut conn, &b.id, &[d.id.clone()]).unwrap();
-        set_task_deps(&mut conn, &c.id, &[d.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &b.id, std::slice::from_ref(&d.id)).unwrap();
+        set_task_deps(&mut conn, &c.id, std::slice::from_ref(&d.id)).unwrap();
         let got = set_task_deps(&mut conn, &a.id, &[b.id.clone(), c.id.clone()]).unwrap();
         assert_eq!(got.depends_on.len(), 2);
     }
@@ -838,7 +884,7 @@ mod tests {
         let mut conn = fresh();
         let a = create_task(&mut conn, "a", None, None).unwrap();
         let b = create_task(&mut conn, "b", None, None).unwrap();
-        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &a.id, std::slice::from_ref(&b.id)).unwrap();
 
         let got = set_task_deps(&mut conn, &a.id, &[]).unwrap();
         assert!(got.depends_on.is_empty());
@@ -849,7 +895,7 @@ mod tests {
         let mut conn = fresh();
         let b = create_task(&mut conn, "b", None, None).unwrap();
         assert!(matches!(
-            set_task_deps(&mut conn, "nope", &[b.id.clone()]),
+            set_task_deps(&mut conn, "nope", std::slice::from_ref(&b.id)),
             Err(AppError::NotFound(_))
         ));
     }
@@ -860,7 +906,7 @@ mod tests {
         let mut conn = fresh();
         let a = create_task(&mut conn, "a", None, None).unwrap();
         let b = create_task(&mut conn, "b", None, None).unwrap();
-        set_task_deps(&mut conn, &a.id, &[b.id.clone()]).unwrap();
+        set_task_deps(&mut conn, &a.id, std::slice::from_ref(&b.id)).unwrap();
 
         delete_task(&conn, &b.id).unwrap();
         let rows: i64 = conn

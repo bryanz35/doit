@@ -145,7 +145,7 @@ export function TaskDetail({
             setPage("focus");
           }}
         >
-          Start focus <Kbd>F</Kbd>
+          Start focus
         </button>
       </div>
     </aside>

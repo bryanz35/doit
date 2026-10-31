@@ -56,7 +56,6 @@ interface AppState {
    *  always knows both ends, and the backend has no patch shape for blocks. */
   updateBlock: (blockId: string, startAt: string, endAt: string) => void;
   deleteBlock: (blockId: string) => void;
-  refresh: () => void;
   setPaletteOpen: (open: boolean) => void;
   setComposeOpen: (open: boolean) => void;
   setScope: (scope: TaskScope) => void;
@@ -143,6 +142,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           due: parsed.due ?? undefined,
           list: parsed.list,
         });
+        // Shown as soon as it exists, so a failed follow-up below cannot leave a
+        // saved task off screen (and a retry would then add it twice).
+        const created = task;
+        setTasks((current) => [...current, created]);
+        setSelectedTaskId(task.id);
         // create_task takes neither of these, so they are follow-up commands.
         // Each returns the whole row, so the last one wins and stays authoritative.
         if (parsed.estimateMinutes !== undefined) {
@@ -150,12 +154,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             id: task.id,
             patch: { estimateMinutes: parsed.estimateMinutes },
           });
+          merge(task);
         }
         if (parsed.tags.length > 0) {
           task = await invoke<Task>("set_task_tags", { id: task.id, tags: parsed.tags });
+          merge(task);
         }
-        setTasks((current) => [...current, task]);
-        setSelectedTaskId(task.id);
         setError(null);
         return task;
       } catch (err) {
@@ -163,7 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return null;
       }
     },
-    [],
+    [merge],
   );
 
   const updateTask = useCallback(
@@ -267,7 +271,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
-      refresh,
       setPaletteOpen,
       setComposeOpen,
       setScope,
@@ -291,7 +294,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
-      refresh,
       today,
     ],
   );

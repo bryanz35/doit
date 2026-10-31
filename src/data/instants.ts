@@ -31,12 +31,24 @@ export function atMinutes(iso: string, minutes: number): string {
   return toInstant(new Date(y, m - 1, d, 0, minutes, 0, 0));
 }
 
-/** Local calendar date of an instant, as the same YYYY-MM-DD the grid keys on. */
-export function dateOf(instant: string): string {
-  const date = fromInstant(instant);
+/** A Date's local calendar day as YYYY-MM-DD — the shape `due` stores and the
+ *  grid keys on. `toISOString()` would be wrong here: it converts to UTC first,
+ *  so an evening west of Greenwich reports tomorrow. */
+export function localDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** Shift a YYYY-MM-DD by whole local days, without going through UTC. */
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return localDate(new Date(y, m - 1, d + days));
+}
+
+/** Local calendar date of an instant, as the same YYYY-MM-DD the grid keys on. */
+export function dateOf(instant: string): string {
+  return localDate(fromInstant(instant));
 }
 
 /** Minutes past local midnight of an instant's own day. */

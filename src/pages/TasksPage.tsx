@@ -8,6 +8,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../data/store";
 import type { Task } from "../types";
 import { inScope, listColor, scopeColor, scopeTitle } from "../data/scope";
+import { localDate } from "../data/instants";
 import { CheckBox, Kbd, MOD_KEY, Segmented, dueLabel, formatMinutes } from "../components/primitives";
 import { AddTaskButton, AddTaskRow } from "../components/AddTaskRow";
 import { TaskDetail } from "../components/TaskDetail";
@@ -28,8 +29,7 @@ function completedLabel(completedAt: string | undefined, today: string): string 
   if (!completedAt) return "";
   const at = new Date(completedAt);
   if (Number.isNaN(at.getTime())) return completedAt;
-  const local = `${at.getFullYear()}-${`${at.getMonth() + 1}`.padStart(2, "0")}-${`${at.getDate()}`.padStart(2, "0")}`;
-  return local === today
+  return localDate(at) === today
     ? at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     : at.toLocaleDateString(undefined, { weekday: "short" });
 }

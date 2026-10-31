@@ -4,9 +4,8 @@
 
 DOIT — a lightweight TODO desktop app for developers / project managers (see `project-plan.md` for the intended scope: task list, calendar, pomodoro focus timer, whiteboard/graph page, external calendar export; later an LLM command API and Linux dotfile integration).
 
-**Status: tasks and calendar blocks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, ten Tauri commands, and a frontend store that calls them. The calendar schedules real blocks against real tasks (no external-calendar import/export yet, and the sync badge in its topbar is still a stub); the focus, graph, and settings screens still render from `src/data/mock.ts` and have no backend at all.
+**Status: tasks and calendar blocks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, ten Tauri commands, and a frontend store that calls them. The calendar schedules real blocks against real tasks (no external-calendar import/export yet, and the sync badge in its topbar is still a stub). The focus timer and settings now have a tested backend (`focus.rs`, `alarm.rs`, `settings.rs`, nine commands), but their screens do not call it yet — `FocusPage` still ticks a local mock timer. The graph screen renders from `src/data/mock.ts` and has no backend at all.
 
-Stated preference in `project-plan.md`: the frontend UI is meant to be built with Claude's help; the Rust backend the author writes themselves. Respect that split — don't add Rust commands unprompted.
 
 ## Commands
 
@@ -15,6 +14,8 @@ npm run tauri dev      # run the desktop app (spawns vite on :1420 + cargo build
 npm run tauri build    # bundle release binaries
 npm run dev            # vite only, browser at :1420 — Tauri `invoke` calls will fail
 npm run build          # tsc typecheck + vite build (this is the typecheck step; noEmit is set)
+npm test               # node --test over src/**/*.test.ts (pure modules in src/data)
+node --test --test-name-pattern="DST" src/data/blocks.test.ts   # single test
 ```
 
 In `src-tauri/`:
@@ -25,7 +26,7 @@ cargo test tasks::tests::toggle_flips   # single test by path
 cargo clippy --all-targets
 ```
 
-No frontend test runner, linter, or formatter is configured. If adding one, wire the script into `package.json` and note the single-test invocation here.
+Frontend tests use Node's built-in runner, no dependency: Node strips the types, so a tested module must be pure (no JSX, no React) and import its siblings with the `.ts` extension. `tsconfig.json` excludes `*.test.ts` (no `@types/node`), so tests are not typechecked. No linter or formatter is configured.
 
 ## Architecture
 

@@ -24,7 +24,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useApp } from "../data/store";
 import { useClock } from "../data/clock";
 import type { Task, TaskBlock } from "../types";
-import { atMinutes, clockOf, durationMinutes } from "../data/instants";
+import { addDays, atMinutes, clockOf, localDate } from "../data/instants";
+import { MINUTES_PER_DAY, segmentsByDate, type Segment } from "../data/blocks";
 import { listColor } from "../data/scope";
 import { Kbd, Segmented, formatMinutes } from "../components/primitives";
 import { TaskDetail } from "../components/TaskDetail";
@@ -62,7 +63,6 @@ const SNAP = 15;
 const DEFAULT_BLOCK_MINUTES = 60;
 const MIN_BLOCK_MINUTES = 15;
 const MAX_BLOCK_MINUTES = 8 * 60;
-const MINUTES_PER_DAY = 24 * 60;
 
 const snap = (minutes: number) => Math.round(minutes / SNAP) * SNAP;
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
@@ -256,25 +256,13 @@ function parseIso(iso: string): Date {
   return new Date(y, m - 1, d);
 }
 
-function toIso(date: Date): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function addDays(iso: string, days: number): string {
-  const date = parseIso(iso);
-  date.setDate(date.getDate() + days);
-  return toIso(date);
-}
-
 /** Same day-of-month in another month, clamped so 31 Jan + 1 month is 28/29 Feb. */
 function addMonths(iso: string, months: number): string {
   const date = parseIso(iso);
   const target = new Date(date.getFullYear(), date.getMonth() + months, 1);
   const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
   target.setDate(Math.min(date.getDate(), lastDay));
-  return toIso(target);
+  return localDate(target);
 }
 
 /** Monday of the week containing `iso`. */
@@ -291,8 +279,8 @@ function weekOf(iso: string): string[] {
 /** Whole Monday-start weeks covering the month containing `iso`. */
 function monthWeeks(iso: string): string[][] {
   const date = parseIso(iso);
-  const first = toIso(new Date(date.getFullYear(), date.getMonth(), 1));
-  const last = toIso(new Date(date.getFullYear(), date.getMonth() + 1, 0));
+  const first = localDate(new Date(date.getFullYear(), date.getMonth(), 1));
+  const last = localDate(new Date(date.getFullYear(), date.getMonth() + 1, 0));
   const weeks: string[][] = [];
   for (let monday = startOfWeek(first); monday <= last; monday = addDays(monday, 7)) {
     weeks.push(weekOf(monday));
@@ -320,75 +308,6 @@ function calendarTitle(view: Density, anchor: string, days: string[]): { strong:
 }
 
 // ── blocks on the grid ───────────────────────────────────────────────
-
-/** One block's share of one local day, in minutes past that day's midnight.
- *  A block that runs past midnight produces a segment on each day it touches,
- *  so the grid can draw both halves without the block itself being split. */
-interface Segment {
-  block: TaskBlock;
-  task: Task;
-  date: string;
-  from: number;
-  to: number;
-  /** False on the tail of a block that started the day before — the tail is not
-   *  draggable or resizable, since its own edges are not on this day. */
-  whole: boolean;
-  lane: number;
-  lanes: number;
-}
-
-/** Blocks overlap only across different tasks (the backend forbids two blocks on
- *  one task from covering the same minute), but when they do the column has to
- *  split. Greedy lane packing over a run of mutually overlapping segments. */
-function withLanes(segments: Segment[]): Segment[] {
-  const sorted = [...segments].sort((a, b) => a.from - b.from || a.to - b.to);
-  let cluster: Segment[] = [];
-  let clusterEnd = -1;
-  const closeCluster = () => {
-    const lanes = cluster.reduce((most, seg) => Math.max(most, seg.lane + 1), 1);
-    for (const seg of cluster) seg.lanes = lanes;
-    cluster = [];
-  };
-  for (const seg of sorted) {
-    if (seg.from >= clusterEnd) closeCluster();
-    clusterEnd = Math.max(clusterEnd, seg.to);
-    const taken = new Set(cluster.filter((other) => other.to > seg.from).map((o) => o.lane));
-    while (taken.has(seg.lane)) seg.lane += 1;
-    cluster.push(seg);
-  }
-  closeCluster();
-  return sorted;
-}
-
-/** Every block that touches one of `days`, bucketed by local date.
- *  Instants are canonical UTC, so the overlap test is a plain string compare. */
-function segmentsByDate(tasks: Task[], days: string[]): Map<string, Segment[]> {
-  const byDate = new Map<string, Segment[]>();
-  for (const date of days) {
-    const dayStart = atMinutes(date, 0);
-    const dayEnd = atMinutes(date, MINUTES_PER_DAY);
-    const found: Segment[] = [];
-    for (const task of tasks) {
-      for (const block of task.blocks) {
-        if (block.startAt >= dayEnd || block.endAt <= dayStart) continue;
-        const from = Math.max(0, durationMinutes(dayStart, block.startAt));
-        const to = Math.min(MINUTES_PER_DAY, durationMinutes(dayStart, block.endAt));
-        found.push({
-          block,
-          task,
-          date,
-          from,
-          to,
-          whole: block.startAt >= dayStart && block.endAt <= dayEnd,
-          lane: 0,
-          lanes: 1,
-        });
-      }
-    }
-    byDate.set(date, withLanes(found));
-  }
-  return byDate;
-}
 
 /** How long a block made from this task should be. */
 function blockLengthFor(task: Task): number {

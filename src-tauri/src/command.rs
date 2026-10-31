@@ -1,10 +1,13 @@
 // goal: take connection out of managed state, call into tasks, return to frontend.
 
+use crate::alarm::Alarm;
 use crate::db::Db;
 use crate::error::{AppError, Result};
-use crate::model::{Task, TaskPatch};
-use crate::tasks;
+use crate::model::{FocusDay, FocusKind, FocusOutcome, FocusSession, Task, TaskPatch};
+use crate::{focus, settings, tasks};
+use chrono::Utc;
 use rusqlite::Connection;
+use std::collections::HashMap;
 use std::sync::MutexGuard;
 use tauri::State;
 
@@ -80,4 +83,78 @@ pub fn update_block(
 pub fn delete_block(db: State<'_, Db>, id: String) -> Result<()> {
     let conn = lock(&db)?;
     tasks::delete_block(&conn, &id)
+}
+
+// ---- focus ----
+//
+// Every command that can move the deadline reports the session it returns to
+// the alarm, which re-arms or disarms itself from it.
+
+#[tauri::command]
+pub fn current_focus(db: State<'_, Db>, alarm: State<'_, Alarm>) -> Result<Option<FocusSession>> {
+    let conn = lock(&db)?;
+    let session = focus::current(&conn, Utc::now())?;
+    alarm.follow(session.as_ref());
+    Ok(session)
+}
+#[tauri::command]
+pub fn start_focus(
+    db: State<'_, Db>,
+    alarm: State<'_, Alarm>,
+    task_id: Option<String>,
+    kind: FocusKind,
+    planned_seconds: i64,
+) -> Result<FocusSession> {
+    let conn = lock(&db)?;
+    let session = focus::start(&conn, task_id.as_deref(), kind, planned_seconds, Utc::now())?;
+    alarm.follow(Some(&session));
+    Ok(session)
+}
+#[tauri::command]
+pub fn pause_focus(db: State<'_, Db>, alarm: State<'_, Alarm>) -> Result<FocusSession> {
+    let conn = lock(&db)?;
+    let session = focus::pause(&conn, Utc::now())?;
+    alarm.follow(Some(&session));
+    Ok(session)
+}
+#[tauri::command]
+pub fn resume_focus(db: State<'_, Db>, alarm: State<'_, Alarm>) -> Result<FocusSession> {
+    let conn = lock(&db)?;
+    let session = focus::resume(&conn, Utc::now())?;
+    alarm.follow(Some(&session));
+    Ok(session)
+}
+#[tauri::command]
+pub fn finish_focus(
+    db: State<'_, Db>,
+    alarm: State<'_, Alarm>,
+    outcome: FocusOutcome,
+) -> Result<Option<FocusSession>> {
+    let conn = lock(&db)?;
+    let session = focus::finish(&conn, outcome, Utc::now())?;
+    alarm.follow(None);
+    Ok(session)
+}
+#[tauri::command]
+pub fn log_interruption(db: State<'_, Db>, note: String) -> Result<FocusSession> {
+    let conn = lock(&db)?;
+    focus::log_interruption(&conn, &note, Utc::now())
+}
+#[tauri::command]
+pub fn focus_day(db: State<'_, Db>, from: String, to: String) -> Result<FocusDay> {
+    let conn = lock(&db)?;
+    focus::day(&conn, &from, &to, Utc::now())
+}
+
+// ---- settings ----
+
+#[tauri::command]
+pub fn get_settings(db: State<'_, Db>) -> Result<HashMap<String, String>> {
+    let conn = lock(&db)?;
+    settings::get_settings(&conn)
+}
+#[tauri::command]
+pub fn set_setting(db: State<'_, Db>, key: String, value: Option<String>) -> Result<()> {
+    let conn = lock(&db)?;
+    settings::set_setting(&conn, &key, value.as_deref())
 }

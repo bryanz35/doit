@@ -11,6 +11,9 @@
  *   =30m =1h =1h30m =90                              estimate
  */
 
+// `.ts` so `node --test` can resolve it; Vite and tsc accept either.
+import { addDays } from "./instants.ts";
+
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 export interface QuickAdd {
@@ -25,15 +28,6 @@ export interface QuickAdd {
   /** Tokens that carried a sigil but parsed to nothing — shown as a hint so a
    *  typo'd `@tmrw` is visible instead of silently dropped from the title. */
   unknown: string[];
-}
-
-/** Shift a YYYY-MM-DD by whole days without going through UTC. */
-function addDays(iso: string, days: number): string {
-  const date = new Date(`${iso}T00:00:00`);
-  date.setDate(date.getDate() + days);
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /** `@…` → an ISO date, `null` for someday, `undefined` when unrecognised. */

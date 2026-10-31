@@ -21,5 +21,8 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
+  // Tests run under `node --test`, which strips types without checking them;
+  // tsc has no @types/node for `node:test`.
+  "exclude": ["src/**/*.test.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -7,14 +7,11 @@
  * is suspended, so a fixed long wait would wake hours late. */
 
 import { useEffect, useState } from "react";
+import { localDate } from "./instants";
 
-/** Local calendar date as YYYY-MM-DD — the same shape the `due` column stores.
- *  `toISOString()` would be wrong here: it converts to UTC first, so an evening
- *  west of Greenwich reports tomorrow. */
+/** Today's local calendar date as YYYY-MM-DD. */
 export function todayIso(now = new Date()): string {
-  const month = `${now.getMonth() + 1}`.padStart(2, "0");
-  const day = `${now.getDate()}`.padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
+  return localDate(now);
 }
 
 /** The local date and minutes past local midnight, read from one instant so the

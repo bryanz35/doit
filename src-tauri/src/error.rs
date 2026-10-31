@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("no calendar block with id {0}")]
     BlockNotFound(String),
 
+    #[error("no focus session is running")]
+    NoFocusSession,
+
     #[error("{0}")]
     Invalid(String),
 

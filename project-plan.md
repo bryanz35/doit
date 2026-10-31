@@ -3,11 +3,6 @@
 DOIT is intended to a clean, lightweight TODO app designed for developers /
 project managers.
 
-
-frontend:
-make clean ui with react/claude - check skills plugin
-backend: code by self
-
 pages:
  - standard task list
  - calendar page
@@ -38,7 +33,7 @@ land. The frontend is untouched: ~2k lines of UI still reading
 "Working" for the first milestone means: tasks survive a restart, the timer is
 real, the calendar exports. Everything past that is the scope above.
 
-## 1. Backend — storage done, commands not started (self-written)
+## 1. Backend — storage done, commands not started
 
 **Storage** — done.
 
