@@ -15,8 +15,18 @@ interface Action {
 }
 
 export function CommandPalette() {
-  const { tasks, paletteOpen, setPaletteOpen, selectTask, setPage, addTask, setComposeOpen, today } =
-    useApp();
+  const {
+    tasks,
+    paletteOpen,
+    setPaletteOpen,
+    selectTask,
+    setPage,
+    addTask,
+    setComposeOpen,
+    today,
+    focus,
+    startFocus,
+  } = useApp();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -44,8 +54,8 @@ export function CommandPalette() {
 
   const target = matches[0];
 
-  // TODO(backend): the scheduling / timer actions become real commands once
-  // Rust is wired. Creating is not a stub — it runs `create_task`.
+  // TODO(backend): the scheduling actions become real commands once Rust is
+  // wired. Creating runs `create_task` and focus runs `start_focus`.
   const actions = useMemo<Action[]>(() => {
     const typed = query.trim();
     const create: Action = typed
@@ -98,15 +108,17 @@ export function CommandPalette() {
       },
       {
         id: "focus",
-        label: `Start focus session on “${target.title}”`,
+        // One session at a time: with one open this only shows the timer.
+        label: focus ? "Show the running focus session" : `Start focus session on “${target.title}”`,
         Icon: FocusIcon,
         run: () => {
           selectTask(target.id);
+          if (!focus) void startFocus("work", target.id);
           setPage("focus");
         },
       },
     ];
-  }, [target, tasks, query, selectTask, setPage, addTask, setComposeOpen]);
+  }, [target, tasks, query, selectTask, setPage, addTask, setComposeOpen, focus, startFocus]);
 
   if (!paletteOpen) return null;
 

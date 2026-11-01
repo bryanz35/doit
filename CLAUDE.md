@@ -4,7 +4,7 @@
 
 DOIT — a lightweight TODO desktop app for developers / project managers (see `project-plan.md` for the intended scope: task list, calendar, pomodoro focus timer, whiteboard/graph page, external calendar export; later an LLM command API and Linux dotfile integration).
 
-**Status: tasks and calendar blocks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, ten Tauri commands, and a frontend store that calls them. The calendar schedules real blocks against real tasks (no external-calendar import/export yet, and the sync badge in its topbar is still a stub). The focus timer and settings now have a tested backend (`focus.rs`, `alarm.rs`, `settings.rs`, nine commands), but their screens do not call it yet — `FocusPage` still ticks a local mock timer. The graph screen renders from `src/data/mock.ts` and has no backend at all.
+**Status: tasks and calendar blocks are wired end to end; every other feature is still mock data.** The tasks domain has a SQLite schema, a tested data layer, ten Tauri commands, and a frontend store that calls them. The calendar schedules real blocks against real tasks (no external-calendar import/export yet, and the sync badge in its topbar is still a stub). The focus timer is wired end to end (`focus.rs`, `alarm.rs`; `FocusPage` counts down to the session's `endsAt`). Settings has a backend; only its Focus & timers section uses it. The graph screen renders from `src/data/mock.ts` and has no backend at all.
 
 
 ## Commands

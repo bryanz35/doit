@@ -1,9 +1,12 @@
 /** Settings, laid out like System Settings: a section list on the left and
  *  inset groups of rows on the right. Calendars (connected accounts and the
- *  outbound ICS feed) is mock data; Keybinds lists the real bindings. */
+ *  outbound ICS feed) is mock data; Keybinds lists the real bindings; Focus &
+ *  timers reads and writes real settings. */
 
 import { useState } from "react";
 import { calendarAccounts, feedUrl } from "../data/mock";
+import { useApp } from "../data/store";
+import { FOCUS_DEFAULTS, FOCUS_LIMITS, type FocusPrefs } from "../data/focusplan";
 import { Kbd, MOD_KEY } from "../components/primitives";
 
 const SECTIONS = ["General", "Calendars", "Focus & timers", "Keybinds", "Data & export"] as const;
@@ -39,6 +42,8 @@ export function SettingsPage() {
             <CalendarSettings />
           ) : section === "Keybinds" ? (
             <KeybindSettings />
+          ) : section === "Focus & timers" ? (
+            <FocusSettings />
           ) : (
             <Placeholder section={section} />
           )}
@@ -165,6 +170,58 @@ function KeybindSettings() {
             <Kbd>{keys}</Kbd>
           </div>
         ))}
+      </div>
+    </>
+  );
+}
+
+const FOCUS_FIELDS: [keyof FocusPrefs, string][] = [
+  ["workMinutes", "Focus length (minutes)"],
+  ["shortBreakMinutes", "Short break (minutes)"],
+  ["longBreakMinutes", "Long break (minutes)"],
+  ["longBreakEvery", "Long break every (pomodoros)"],
+  ["dailyGoalMinutes", "Daily goal (minutes)"],
+];
+
+function FocusSettings() {
+  const { focusPrefs, setSetting } = useApp();
+
+  return (
+    <>
+      <h2>Focus & timers</h2>
+      <p>Changes apply to the next session; one already running keeps its length.</p>
+      <div className="dt-group">
+        {FOCUS_FIELDS.map(([field, label]) => {
+          const [min, max] = FOCUS_LIMITS[field];
+          return (
+            <label className="dt-form-row" key={field}>
+              <span>{label}</span>
+              {/* Uncontrolled and saved on blur, so typing "4" on the way to "45"
+                  never writes; a reset re-mounts it through the key. */}
+              <input
+                key={focusPrefs[field]}
+                className="dt-input settings-number"
+                type="number"
+                min={min}
+                max={max}
+                step={1}
+                defaultValue={focusPrefs[field]}
+                onBlur={(event) => {
+                  const value = event.currentTarget.valueAsNumber;
+                  if (!Number.isInteger(value) || value < min || value > max) {
+                    event.currentTarget.value = String(focusPrefs[field]);
+                  } else if (value !== focusPrefs[field]) {
+                    // A default is stored as "unset", so a later change of default reaches it.
+                    setSetting(`focus.${field}`, value === FOCUS_DEFAULTS[field] ? null : String(value));
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+              />
+            </label>
+          );
+        })}
       </div>
     </>
   );

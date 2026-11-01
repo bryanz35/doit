@@ -1,9 +1,10 @@
 /** Domain types shared with the Rust side.
  *
- * `Task`/`TaskStatus`/`TaskPatch` are the deserialized results of `invoke(...)`
- * and must stay in step with the serde structs in src-tauri/src/model.rs by hand
- * (JS camelCase ↔ Rust snake_case) — `invoke<Task>(...)` asserts, it does not
- * validate. The rest still describe mock data for screens with no backend. */
+ * `Task`/`TaskStatus`/`TaskPatch` and the `Focus*` types are the deserialized
+ * results of `invoke(...)` and must stay in step with the serde structs in
+ * src-tauri/src/model.rs by hand (JS camelCase ↔ Rust snake_case) —
+ * `invoke<Task>(...)` asserts, it does not validate. The rest still describe
+ * mock data for screens with no backend. */
 
 export type PageId = "tasks" | "calendar" | "focus" | "graph" | "settings";
 
@@ -77,19 +78,45 @@ export interface GraphEdge {
   accent?: boolean;
 }
 
+export type FocusKind = "work" | "short-break" | "long-break";
+export type FocusOutcome = "completed" | "skipped" | "abandoned";
+
+/** One pomodoro or break — mirrors `FocusSession` in model.rs. Instants are
+ *  canonical UTC. The derived fields are only as fresh as the read: count down
+ *  from `endsAt` (present only while running), not from `remainingSeconds`. */
 export interface FocusSession {
-  taskId: string;
-  /** Index of the current session within today's plan, 1-based. */
-  index: number;
-  plannedSessions: number;
-  workMinutes: number;
-  breakMinutes: number;
+  id: string;
+  taskId?: string;
+  blockId?: string;
+  kind: FocusKind;
+  startedAt: string;
+  plannedSeconds: number;
+  pausedAt?: string;
+  pausedSeconds: number;
+  endedAt?: string;
+  outcome?: FocusOutcome;
+  endsAt?: string;
   remainingSeconds: number;
-  running: boolean;
-  /** Completed pomodoros today, used for the pip row. */
-  completedToday: number;
-  goalMinutes: number;
-  focusedMinutes: number;
+  elapsedSeconds: number;
+  interruptions: FocusInterruption[];
+}
+
+export interface FocusInterruption {
+  id: string;
+  sessionId: string;
+  at: string;
+  note: string;
+}
+
+/** Sessions started in `[from, to)` — the local day — and their totals. */
+export interface FocusDay {
+  from: string;
+  to: string;
+  /** Completed work sessions. */
+  pomodoros: number;
+  /** Work time of any outcome, the open session included up to the read. */
+  focusedSeconds: number;
+  sessions: FocusSession[];
 }
 
 export interface CalendarAccount {

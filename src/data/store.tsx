@@ -15,9 +15,20 @@ import {
   type ReactNode,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { PageId, Task, TaskPatch, TaskScope } from "../types";
+import { listen } from "@tauri-apps/api/event";
+import type {
+  FocusDay,
+  FocusKind,
+  FocusOutcome,
+  FocusSession,
+  PageId,
+  Task,
+  TaskPatch,
+  TaskScope,
+} from "../types";
 import { parseQuickAdd } from "./quickadd";
-import { localZone } from "./instants";
+import { addDays, atMinutes, localZone } from "./instants";
+import { focusPrefs, minutesFor, type FocusPrefs } from "./focusplan";
 import { todayIso, useToday } from "./clock";
 
 interface AppState {
@@ -56,6 +67,27 @@ interface AppState {
    *  always knows both ends, and the backend has no patch shape for blocks. */
   updateBlock: (blockId: string, startAt: string, endAt: string) => void;
   deleteBlock: (blockId: string) => void;
+
+  /** Stored settings; a missing key means the frontend default. */
+  settings: Record<string, string>;
+  /** Write one setting, or with `null` reset it to its default. */
+  setSetting: (key: string, value: string | null) => void;
+  /** Timer lengths and goal, parsed out of `settings` with defaults. */
+  focusPrefs: FocusPrefs;
+
+  /** The open focus session, if any. Count down from its `endsAt`. */
+  focus: FocusSession | null;
+  /** Today's sessions and totals; null until the first read settles. */
+  focusDay: FocusDay | null;
+  /** Start a session of `kind`, its length taken from `focusPrefs`. */
+  /** Each focus command settles once state is re-read, so two can be chained
+   *  (finish, then start a break); failures land in `error`, never reject. */
+  startFocus: (kind: FocusKind, taskId?: string) => Promise<void>;
+  pauseFocus: () => Promise<void>;
+  resumeFocus: () => Promise<void>;
+  finishFocus: (outcome: FocusOutcome) => Promise<void>;
+  logInterruption: (note: string) => Promise<void>;
+
   setPaletteOpen: (open: boolean) => void;
   setComposeOpen: (open: boolean) => void;
   setScope: (scope: TaskScope) => void;
@@ -91,6 +123,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
   const [scope, setScope] = useState<TaskScope>({ kind: "smart", id: "all" });
+  const [settings, setSettings] = useState<Record<string, string>>({});
+  const [focus, setFocus] = useState<FocusSession | null>(null);
+  const [focusDay, setFocusDay] = useState<FocusDay | null>(null);
 
   // Rolls over at midnight: the window can stay open for days, and every
   // overdue/today/later split downstream reads this.
@@ -251,6 +286,94 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Settings. `set_setting` returns nothing, so the map is updated locally once
+  // the write succeeds.
+  useEffect(() => {
+    invoke<Record<string, string>>("get_settings").then(setSettings, (err) =>
+      setError(messageOf(err)),
+    );
+  }, []);
+
+  const setSetting = useCallback(async (key: string, value: string | null) => {
+    try {
+      await invoke<void>("set_setting", { key, value: value ?? undefined });
+      setSettings((current) => {
+        const next = { ...current };
+        if (value === null) delete next[key];
+        else next[key] = value;
+        return next;
+      });
+      setError(null);
+    } catch (err) {
+      setError(messageOf(err));
+    }
+  }, []);
+
+  const prefs = useMemo(() => focusPrefs(settings), [settings]);
+
+  // Focus. Every focus command returns the session it touched; an ended one is
+  // no longer "open", and any change moves the day's totals, so the day is
+  // re-read after each — it is one small query.
+  const loadFocus = useCallback(async () => {
+    const [open, day] = await Promise.all([
+      invoke<FocusSession | null>("current_focus"),
+      invoke<FocusDay>("focus_day", {
+        from: atMinutes(today, 0),
+        to: atMinutes(addDays(today, 1), 0),
+      }),
+    ]);
+    setFocus(open);
+    setFocusDay(day);
+  }, [today]);
+
+  const runFocus = useCallback(
+    async (command: string, args?: Record<string, unknown>) => {
+      try {
+        await invoke<FocusSession | null>(command, args);
+        await loadFocus();
+        setError(null);
+      } catch (err) {
+        setError(messageOf(err));
+      }
+    },
+    [loadFocus],
+  );
+
+  // Re-read on mount, at midnight (`today` moves), and whenever the alarm
+  // closes a session that ran out.
+  useEffect(() => {
+    loadFocus().catch((err) => setError(messageOf(err)));
+    let gone = false;
+    let unlisten: (() => void) | undefined;
+    listen<FocusSession>("focus-ended", () => {
+      loadFocus().catch((err) => setError(messageOf(err)));
+    }).then((stop) => (gone ? stop() : (unlisten = stop)));
+    return () => {
+      gone = true;
+      unlisten?.();
+    };
+  }, [loadFocus]);
+
+  const startFocus = useCallback(
+    (kind: FocusKind, taskId?: string) =>
+      runFocus("start_focus", {
+        kind,
+        taskId,
+        plannedSeconds: minutesFor(kind, prefs) * 60,
+      }),
+    [runFocus, prefs],
+  );
+  const pauseFocus = useCallback(() => runFocus("pause_focus"), [runFocus]);
+  const resumeFocus = useCallback(() => runFocus("resume_focus"), [runFocus]);
+  const finishFocus = useCallback(
+    (outcome: FocusOutcome) => runFocus("finish_focus", { outcome }),
+    [runFocus],
+  );
+  const logInterruption = useCallback(
+    (note: string) => runFocus("log_interruption", { note }),
+    [runFocus],
+  );
+
   const value = useMemo<AppState>(
     () => ({
       tasks,
@@ -271,6 +394,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
+      settings,
+      setSetting,
+      focusPrefs: prefs,
+      focus,
+      focusDay,
+      startFocus,
+      pauseFocus,
+      resumeFocus,
+      finishFocus,
+      logInterruption,
       setPaletteOpen,
       setComposeOpen,
       setScope,
@@ -294,6 +427,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
+      settings,
+      setSetting,
+      prefs,
+      focus,
+      focusDay,
+      startFocus,
+      pauseFocus,
+      resumeFocus,
+      finishFocus,
+      logInterruption,
       today,
     ],
   );
