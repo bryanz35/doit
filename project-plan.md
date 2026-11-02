@@ -29,18 +29,18 @@ what order.
 
 ---
 
-# Status (2026-10-30)
+# Status (2026-11-02)
 
 | Area | Backend | Frontend | State |
 | --- | --- | --- | --- |
 | Tasks | `tasks.rs`, 7 commands | `TasksPage`, vim list keys, quick-add | Wired; detail pane read-only |
-| Calendar blocks | `task_blocks`, 3 commands | `CalendarPage` Day/Week/Month | Wired; no import/export |
+| Calendar blocks | `task_blocks`, 3 commands | `CalendarPage` Day/Week/Month | Wired; no import |
 | Focus | `focus.rs`, `alarm.rs`, 7 commands | `FocusPage`, palette | Wired; no do-not-disturb |
 | Settings | `settings.rs`, 2 commands | `SettingsPage` | Focus & timers wired; rest mock + placeholders |
 | Graph | none | `GraphPage` | Mock data only |
-| Calendar export | none | Settings → Calendars | Mock `feedUrl` |
+| Calendar export | `ics.rs`, 1 command | Settings → Calendars | `.ics` file to Downloads; no live feed |
 
-Tests: `cargo test` has 63 (`tasks` 38, `focus` 21, `settings` 2,
+Tests: `cargo test` has 68 (`tasks` 38, `focus` 21, `ics` 5, `settings` 2,
 `migrations` 2); `npm test` has 9 (`quickadd`, `blocks`, `focusplan`).
 
 Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
@@ -51,7 +51,7 @@ Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
 - **Storage.** SQLite via `rusqlite` (bundled), DB in `app_data_dir()`, pragmas
   on every open (`foreign_keys`, WAL, `busy_timeout`), forward-only migrations
   tracked by `user_version`, each in its own transaction.
-- **Command boundary.** 19 commands registered in `lib.rs`; one `AppError`
+- **Command boundary.** 20 commands registered in `lib.rs`; one `AppError`
   that serializes to a string so a rejected `invoke` carries a message.
 - **Tasks end to end.** `store.tsx` is the only `invoke` caller: async load with
   `loaded`/`error`, mutations fold the returned row back in (no optimistic
@@ -67,7 +67,12 @@ Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
   read, so it survives page switches, restarts and suspend. One open session at
   a time (partial unique index). `alarm.rs` closes an expired session, emits
   `focus-ended` and shows a notification. Pomodoros done per task are counted on
-  every task read.
+  every task read and shown against the estimate (`TaskDetail`, `FocusPage`);
+  tasks are re-read with every focus re-read so the count moves when a session
+  closes.
+- **Calendar export (file).** `export_ics` writes every block (UTC, no
+  `VTIMEZONE`) and optionally every open due date (all-day) to
+  `~/Downloads/doit.ics`; `ics.rs` is pure and tested (escaping, folding).
 - **Packaging.** `productName`/`identifier` set; `docker/build.sh` builds deb,
   rpm and AppImage in Ubuntu 22.04 into `release/`.
 
@@ -81,8 +86,6 @@ Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
   "Session settings" on the focus page lands on the Calendars section.
 - **Command palette.** Scheduling actions are stubs; create task and start
   focus are real.
-- **Focus leftovers.** `Task` in `types.ts` lacks the backend's
-  `pomodorosDone`, so actuals are not shown anywhere yet.
 
 ## Missing UI
 
@@ -98,16 +101,20 @@ Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
   command. It is `REAL` so a reorder can insert between rows; the fn and the
   vim placement (`o`/`O` between rows) wait on it.
 - **Calendar sync badge** (`CalendarPage.tsx:808`) is a stub.
+- **Number operators setting.** Task-list number keybinds need a `g` prefix so
+  vim counts like `2j` work. User feedback: add a Settings toggle "number
+  operators on the task list", default **off**. When on, bare digits switch
+  tabs (no `g`), and counts like `2j` stop working. Not implemented yet.
 
 ## Feature work
 
 - **Graph (no backend).** Persist layout (`load_graph`/`save_graph_layout`,
   `GraphPage.tsx:59`), edge create/delete writing `task_deps`, graph and task
   list reading one source of truth. Then drop the rest of `mock.ts`.
-- **Calendar export.** `feedUrl` is fake. Ship (a) first:
-  - (a) write an `.ics` file on demand — blocks carry their IANA `tz` for this.
+- **Calendar export.** (a) the on-demand `.ics` file is done. Left:
   - (b) serve a live feed over localhost HTTP so Google can subscribe — needs a
-    background server and a stable token.
+    background server and a stable token. Settings has no feed URL row until
+    then. Blocks keep their IANA `tz` for when recurrence needs `TZID`.
 - **Calendar import.** ICS parse (`icalendar` crate) for read-only external
   events. Google/Outlook OAuth (`SettingsPage.tsx:63`) is its own project —
   defer.
@@ -157,11 +164,11 @@ Schema: `001_tasks`, `002_task_schedule` (`task_blocks`), `003_focus`
 **P1 — persistence.** *Done.* SQLite, migrations, task commands, async store,
 real clock, `mock.ts` out of the task list.
 
-**P2 — calendar.** *Mostly done.* Blocks persisted, scheduling gestures, Day
-view, real unscheduled tray. Left: ICS file export.
+**P2 — calendar.** *Done.* Blocks persisted, scheduling gestures, Day view,
+real unscheduled tray, `.ics` file export.
 
 **P3 — focus.** *Done.* Backend, `FocusPage`, Settings timer lengths, palette
-start. Left: show `pomodorosDone`; do not disturb (see Feature work).
+start, `pomodorosDone` shown. Left: do not disturb (see Feature work).
 
 **P4 — editing.** Task detail editing, `TaskPatch` clearing, lists table,
 manual ordering, visible delete.

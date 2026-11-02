@@ -27,6 +27,9 @@ export interface Task {
   estimateMinutes?: number;
   /** Estimate expressed as pomodoros, when the user set one. */
   pomodoros?: number;
+  /** Completed work sessions on this task — the actual against `pomodoros`.
+   *  Counted from the focus log on every read, always present. */
+  pomodorosDone: number;
   list?: string;
   tags: string[];
   repo?: string;

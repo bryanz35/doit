@@ -13,7 +13,7 @@
 import { useApp } from "../data/store";
 import type { Task, TaskBlock } from "../types";
 import { listColor } from "../data/scope";
-import { Kbd, dueLabel, formatMinutes } from "./primitives";
+import { Kbd, dueLabel, formatMinutes, pomodoroLabel } from "./primitives";
 import { clockOf, durationMinutes, fromInstant } from "../data/instants";
 
 /** "Mon 29 Sep · 09:00–10:30" — the block in the reader's own zone, whatever
@@ -74,7 +74,7 @@ export function TaskDetail({
         <div className="dt-field">
           <span className="dt-field-label">Estimate</span>
           <span className="dt-field-value">
-            {task.pomodoros ? `${task.pomodoros} pomodoros · ` : ""}
+            {pomodoroLabel(task) && `${pomodoroLabel(task)} · `}
             {formatMinutes(task.estimateMinutes)}
           </span>
         </div>

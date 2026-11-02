@@ -67,6 +67,9 @@ interface AppState {
    *  always knows both ends, and the backend has no patch shape for blocks. */
   updateBlock: (blockId: string, startAt: string, endAt: string) => void;
   deleteBlock: (blockId: string) => void;
+  /** Write every block — and with `includeDue`, every open due date — to
+   *  `doit.ics` in Downloads. Resolves to the path, or null with `error` set. */
+  exportIcs: (includeDue: boolean) => Promise<string | null>;
 
   /** Stored settings; a missing key means the frontend default. */
   settings: Record<string, string>;
@@ -286,6 +289,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const exportIcs = useCallback(async (includeDue: boolean) => {
+    try {
+      const path = await invoke<string>("export_ics", { includeDue });
+      setError(null);
+      return path;
+    } catch (err) {
+      setError(messageOf(err));
+      return null;
+    }
+  }, []);
+
   // Settings. `set_setting` returns nothing, so the map is updated locally once
   // the write succeeds.
   useEffect(() => {
@@ -313,7 +327,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Focus. Every focus command returns the session it touched; an ended one is
   // no longer "open", and any change moves the day's totals, so the day is
-  // re-read after each — it is one small query.
+  // re-read after each — it is one small query. Tasks are re-read too: a
+  // session that closed moves its task's `pomodorosDone`.
   const loadFocus = useCallback(async () => {
     const [open, day] = await Promise.all([
       invoke<FocusSession | null>("current_focus"),
@@ -321,10 +336,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         from: atMinutes(today, 0),
         to: atMinutes(addDays(today, 1), 0),
       }),
+      refresh(),
     ]);
     setFocus(open);
     setFocusDay(day);
-  }, [today]);
+  }, [today, refresh]);
 
   const runFocus = useCallback(
     async (command: string, args?: Record<string, unknown>) => {
@@ -394,6 +410,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
+      exportIcs,
       settings,
       setSetting,
       focusPrefs: prefs,
@@ -427,6 +444,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addBlock,
       updateBlock,
       deleteBlock,
+      exportIcs,
       settings,
       setSetting,
       prefs,

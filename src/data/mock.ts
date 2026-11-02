@@ -44,5 +44,3 @@ export const calendarAccounts: CalendarAccount[] = [
   { id: "outlook", name: "Outlook", badge: "O", connected: false, detail: "Not connected" },
   { id: "icloud", name: "iCloud Calendar", badge: "IC", connected: false, detail: "Not connected" },
 ];
-
-export const feedUrl = "https://ledger.app/ics/8f3a1c7d-4e21-mode-scheduled.ics";

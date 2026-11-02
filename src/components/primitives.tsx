@@ -73,6 +73,13 @@ export function formatMinutes(minutes: number | undefined): string {
   return `${hours}h ${String(rest).padStart(2, "0")}m`;
 }
 
+/** "1 of 4 pomodoros" against an estimate, "2 pomodoros done" without one,
+ *  "" when there is neither. */
+export function pomodoroLabel(task: { pomodoros?: number; pomodorosDone: number }): string {
+  if (task.pomodoros) return `${task.pomodorosDone} of ${task.pomodoros} pomodoros`;
+  return task.pomodorosDone ? `${task.pomodorosDone} pomodoros done` : "";
+}
+
 /** "14:05" from minutes-past-midnight. */
 export function formatClock(minutes: number): string {
   const h = Math.floor(minutes / 60);

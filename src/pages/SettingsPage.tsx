@@ -1,10 +1,10 @@
 /** Settings, laid out like System Settings: a section list on the left and
- *  inset groups of rows on the right. Calendars (connected accounts and the
- *  outbound ICS feed) is mock data; Keybinds lists the real bindings; Focus &
+ *  inset groups of rows on the right. Calendars' connected accounts are mock
+ *  data, its .ics export is real; Keybinds lists the real bindings; Focus &
  *  timers reads and writes real settings. */
 
 import { useState } from "react";
-import { calendarAccounts, feedUrl } from "../data/mock";
+import { calendarAccounts } from "../data/mock";
 import { useApp } from "../data/store";
 import { FOCUS_DEFAULTS, FOCUS_LIMITS, type FocusPrefs } from "../data/focusplan";
 import { Kbd, MOD_KEY } from "../components/primitives";
@@ -54,8 +54,10 @@ export function SettingsPage() {
 }
 
 function CalendarSettings() {
+  const { exportIcs, error } = useApp();
   const [feedScope, setFeedScope] = useState<"scheduled" | "due">("scheduled");
-  const [copied, setCopied] = useState(false);
+  // What the last export said: the saved path, or false when it failed.
+  const [saved, setSaved] = useState<string | false | null>(null);
 
   return (
     <>
@@ -86,29 +88,10 @@ function CalendarSettings() {
         ))}
       </div>
 
-      <h2>Publish your tasks</h2>
-      <p>A read-only ICS feed of every scheduled task. Subscribe from any client.</p>
+      <h2>Export your tasks</h2>
+      <p>Save your schedule as an .ics file and import it into any calendar app.</p>
 
       <div className="dt-group">
-        <div className="dt-form-stack">
-          <label className="dt-label" htmlFor="feed-url">
-            Feed URL
-          </label>
-          <div className="settings-inline">
-            <input id="feed-url" className="dt-input dt-input-mono" readOnly value={feedUrl} />
-            <button
-              type="button"
-              className="dt-btn dt-btn-primary"
-              onClick={() => {
-                void navigator.clipboard?.writeText(feedUrl);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1500);
-              }}
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-        </div>
         <div className="dt-form-row">
           <label className="dt-radio">
             <input
@@ -136,11 +119,15 @@ function CalendarSettings() {
           <span />
         </div>
         <div className="dt-form-row">
-          <button type="button" className="dt-btn">
-            Download .ics once
-          </button>
-          <button type="button" className="dt-btn dt-btn-danger">
-            Revoke and regenerate
+          <span className="dt-muted">
+            {saved ? `Saved to ${saved}` : saved === false ? error : null}
+          </span>
+          <button
+            type="button"
+            className="dt-btn dt-btn-primary"
+            onClick={async () => setSaved((await exportIcs(feedScope === "due")) ?? false)}
+          >
+            Download .ics
           </button>
         </div>
       </div>

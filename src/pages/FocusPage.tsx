@@ -9,7 +9,14 @@ import { listColor } from "../data/scope";
 import { clockOf } from "../data/instants";
 import { minutesFor, nextKind, plannedSessions } from "../data/focusplan";
 import type { FocusKind } from "../types";
-import { CheckBox, Kbd, Segmented, dueLabel, formatMinutes } from "../components/primitives";
+import {
+  CheckBox,
+  Kbd,
+  Segmented,
+  dueLabel,
+  formatMinutes,
+  pomodoroLabel,
+} from "../components/primitives";
 import { FocusIcon } from "../components/icons";
 
 const KIND_LABELS: Record<FocusKind, string> = {
@@ -155,7 +162,7 @@ export function FocusPage() {
             {task && (
               <p className="dt-focus-meta">
                 {task.list ?? "Inbox"} · due {dueLabel(task.due, today).toLowerCase()}
-                {task.pomodoros ? ` · ${task.pomodoros} pomodoros estimated` : ""}
+                {pomodoroLabel(task) && ` · ${pomodoroLabel(task)}`}
               </p>
             )}
 

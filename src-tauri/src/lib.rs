@@ -3,6 +3,7 @@ mod command;
 mod db;
 mod error;
 mod focus;
+mod ics;
 mod model;
 #[cfg(target_os = "linux")]
 mod pinch;
@@ -44,6 +45,7 @@ pub fn run() {
             command::add_block,
             command::update_block,
             command::delete_block,
+            command::export_ics,
             command::current_focus,
             command::start_focus,
             command::pause_focus,

@@ -181,7 +181,6 @@ body { overflow: hidden; }
 /* ── settings ──────────────────────────────────────────────────────── */
 .dt-settings-body { overflow-y: auto; }
 .dt-settings-body > * { max-width: 720px; }
-.settings-inline { display: flex; gap: var(--space-2); }
 .settings-number { width: 88px; text-align: right; }
 
 /* ── command palette ───────────────────────────────────────────────── */

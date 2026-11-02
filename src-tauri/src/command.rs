@@ -4,12 +4,12 @@ use crate::alarm::Alarm;
 use crate::db::Db;
 use crate::error::{AppError, Result};
 use crate::model::{FocusDay, FocusKind, FocusOutcome, FocusSession, Task, TaskPatch};
-use crate::{focus, settings, tasks};
+use crate::{focus, ics, settings, tasks};
 use chrono::Utc;
 use rusqlite::Connection;
 use std::collections::HashMap;
 use std::sync::MutexGuard;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 fn lock<'a>(db: &'a State<'_, Db>) -> Result<MutexGuard<'a, Connection>> {
     db.0.lock().map_err(|_| AppError::Lock)
@@ -83,6 +83,19 @@ pub fn update_block(
 pub fn delete_block(db: State<'_, Db>, id: String) -> Result<()> {
     let conn = lock(&db)?;
     tasks::delete_block(&conn, &id)
+}
+
+/// Writes every block (and, with `include_due`, every open due date) to
+/// `doit.ics` in the Downloads folder, replacing the last export. Returns the path.
+#[tauri::command]
+pub fn export_ics(app: AppHandle, db: State<'_, Db>, include_due: bool) -> Result<String> {
+    let text = {
+        let conn = lock(&db)?;
+        ics::calendar(&tasks::list_tasks(&conn)?, include_due, Utc::now())
+    }; // the lock is released before touching the disk
+    let path = app.path().download_dir()?.join("doit.ics");
+    std::fs::write(&path, text)?;
+    Ok(path.display().to_string())
 }
 
 // ---- focus ----
